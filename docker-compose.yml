@@ -1,0 +1,40 @@
+services:
+  freqtrade:
+    image: freqtradeorg/freqtrade:stable_freqai
+    container_name: ft-analysis
+    volumes:
+      - ./user_data:/freqtrade/user_data
+      - ../hyperliquid_data/user_data/data/hyperliquid:/freqtrade/data/hyperliquid
+      - ./scripts:/freqtrade/scripts
+    environment:
+      - TZ=Europe/Paris
+    entrypoint: []
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+
+  backtest:
+    image: freqtradeorg/freqtrade:stable_freqai
+    container_name: freqtrade_funding_dryrun
+    restart: unless-stopped
+    volumes:
+      - ./user_data:/freqtrade/user_data
+      - ../hyperliquid_data/user_data/data/hyperliquid:/freqtrade/data/hyperliquid
+    command: >
+      backtesting
+      -c /freqtrade/user_data/config.json
+      -d /freqtrade/data
+
+  webserver:
+    image: freqtradeorg/freqtrade:stable_freqai
+    container_name: freqtrade_funding_dryrun
+    restart: unless-stopped
+    volumes:
+      - ./user_data:/freqtrade/user_data
+      - ../hyperliquid_data/user_data/data/hyperliquid:/freqtrade/data/hyperliquid
+    ports:
+      - "8081:8080"
+    command: >
+      webserver
+      -c /freqtrade/user_data/config.json
+      -d /freqtrade/data

@@ -14,7 +14,7 @@ class Config:
     # Paths
     freqtrade_path: str = "."
     user_data: str = "./user_data"
-    config_file: str = "./user_data/config_analysis.json"
+    config_file: str = "./user_data/config.json"
     data_dir: str = "./data/hyperliquid"
     strategies_dir: str = "./user_data/strategies/generated_v3"
     configs_dir: str = "./configs"
