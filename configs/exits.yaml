@@ -1,0 +1,242 @@
+# =============================================================================
+# FILE: configs/exits.yaml
+# =============================================================================
+# Exit method configurations
+
+exits:
+  # No exit signals (ROI/SL only)
+  none:
+    name: none
+
+  # === Classic RSI Exits ===
+  rsi_70:
+    use_rsi_exit: true
+    rsi_exit_long: 70
+    rsi_exit_short: 30
+
+  rsi_75:
+    use_rsi_exit: true
+    rsi_exit_long: 75
+    rsi_exit_short: 25
+
+  rsi_80:
+    use_rsi_exit: true
+    rsi_exit_long: 80
+    rsi_exit_short: 20
+
+  # === Bollinger Exits ===
+  bb_reversion:
+    use_bb_exit: true
+    bb_exit_long: 0.8
+    bb_exit_short: -0.8
+
+  # === Z-Score Exits (for funding) ===
+  zs_0.5:
+    use_zscore_exit: true
+    zscore_exit_threshold: 0.5
+
+  zs_0.8:
+    use_zscore_exit: true
+    zscore_exit_threshold: 0.8
+
+  zs_1.0:
+    use_zscore_exit: true
+    zscore_exit_threshold: 1.0
+
+  zs_1.5:
+    use_zscore_exit: true
+    zscore_exit_threshold: 1.5
+
+  # === Combo Exits ===
+  combo_60:
+    use_rsi_zscore_combo: true
+    combo_rsi_long: 60
+    combo_rsi_short: 40
+
+  combo_65:
+    use_rsi_zscore_combo: true
+    combo_rsi_long: 65
+    combo_rsi_short: 35
+
+  combo_70:
+    use_rsi_zscore_combo: true
+    combo_rsi_long: 70
+    combo_rsi_short: 30
+
+  combo_rsi_zscore:
+    use_rsi_exit: true
+    rsi_exit_long: 75
+    rsi_exit_short: 25
+    use_zscore_exit: true
+    zscore_exit_threshold: 0.8
+    use_rsi_zscore_combo: true
+    combo_rsi_long: 65
+    combo_rsi_short: 35
+
+  full_tp:
+    use_rsi_exit: true
+    rsi_exit_long: 75
+    rsi_exit_short: 25
+    use_zscore_exit: true
+    zscore_exit_threshold: 0.8
+    use_rsi_zscore_combo: true
+    use_bb_exit: true
+    bb_exit_long: 1.5
+    bb_exit_short: -1.5
+
+  full_conservative:
+    use_rsi_exit: true
+    rsi_exit_long: 80
+    rsi_exit_short: 20
+    use_zscore_exit: true
+    zscore_exit_threshold: 1.0
+    use_rsi_zscore_combo: true
+    combo_rsi_long: 70
+    combo_rsi_short: 30
+
+  full_aggressive:
+    use_rsi_exit: true
+    rsi_exit_long: 70
+    rsi_exit_short: 30
+    use_zscore_exit: true
+    zscore_exit_threshold: 0.5
+    use_rsi_zscore_combo: true
+    combo_rsi_long: 60
+    combo_rsi_short: 40
+
+  # === Stochastic Exit ===
+  stoch_exit:
+    use_stoch_exit: true
+    stoch_exit_long: 80
+    stoch_exit_short: 20
+
+  # === Funding Velocity Exits ===
+  fvel4_2:
+    use_funding_velocity: true
+    funding_vel_period: 4
+    funding_vel_threshold: 0.2
+
+  fvel8_3:
+    use_funding_velocity: true
+    funding_vel_period: 8
+    funding_vel_threshold: 0.3
+
+  fvel12_4:
+    use_funding_velocity: true
+    funding_vel_period: 12
+    funding_vel_threshold: 0.4
+
+  # === Funding Acceleration ===
+  faccel4:
+    use_funding_accel: true
+    funding_accel_period: 4
+
+  faccel8:
+    use_funding_accel: true
+    funding_accel_period: 8
+
+  # === Funding Neutral Zone ===
+  fneu_03:
+    use_funding_neutral: true
+    funding_neutral_zone: 0.3
+
+  fneu_05:
+    use_funding_neutral: true
+    funding_neutral_zone: 0.5
+
+  fneu_08:
+    use_funding_neutral: true
+    funding_neutral_zone: 0.8
+
+  # === Volatility Exits ===
+  vol_15:
+    use_vol_regime_exit: true
+    vol_expansion_mult: 1.5
+
+  vol_20:
+    use_vol_regime_exit: true
+    vol_expansion_mult: 2.0
+
+  vol_25:
+    use_vol_regime_exit: true
+    vol_expansion_mult: 2.5
+
+  # === Volume Spike Exits ===
+  volspi25:
+    use_volume_spike_exit: true
+    volume_spike_mult: 2.5
+
+  volspi30:
+    use_volume_spike_exit: true
+    volume_spike_mult: 3.0
+
+  # === Crypto Trailing Stops ===
+  ctrail15:
+    use_crypto_trail: true
+    crypto_trail_mult: 1.5
+
+  ctrail20:
+    use_crypto_trail: true
+    crypto_trail_mult: 2.0
+
+  ctrail25:
+    use_crypto_trail: true
+    crypto_trail_mult: 2.5
+
+  ctrail30:
+    use_crypto_trail: true
+    crypto_trail_mult: 3.0
+
+  # === RSI Divergence ===
+  rsidiv10:
+    use_rsi_divergence: true
+    divergence_lookback: 10
+
+  rsidiv14:
+    use_rsi_divergence: true
+    divergence_lookback: 14
+
+  # === Crypto Combos ===
+  fvel_neutral:
+    use_funding_velocity: true
+    funding_vel_period: 8
+    funding_vel_threshold: 0.3
+    use_funding_neutral: true
+    funding_neutral_zone: 0.5
+
+  faccelvol:
+    use_funding_accel: true
+    funding_accel_period: 4
+    use_vol_regime_exit: true
+    vol_expansion_mult: 2.0
+
+  triplecrypto:
+    use_funding_velocity: true
+    funding_vel_period: 8
+    funding_vel_threshold: 0.3
+    use_funding_neutral: true
+    funding_neutral_zone: 0.5
+    use_crypto_trail: true
+    crypto_trail_mult: 2.5
+
+  crypto_cons:
+    use_funding_velocity: true
+    funding_vel_period: 12
+    funding_vel_threshold: 0.4
+    use_funding_neutral: true
+    funding_neutral_zone: 0.3
+    use_vol_regime_exit: true
+    vol_expansion_mult: 2.5
+    use_crypto_trail: true
+    crypto_trail_mult: 3.0
+
+  crypto_aggr:
+    use_funding_velocity: true
+    funding_vel_period: 4
+    funding_vel_threshold: 0.2
+    use_funding_neutral: true
+    funding_neutral_zone: 0.8
+    use_vol_regime_exit: true
+    vol_expansion_mult: 1.5
+    use_crypto_trail: true
+    crypto_trail_mult: 1.5

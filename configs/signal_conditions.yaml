@@ -1,0 +1,36 @@
+# =============================================================================
+# FILE: configs/signal_conditions.yaml
+# =============================================================================
+# Atomic signal conditions for combo signals
+
+conditions:
+  # Oversold conditions
+  rsi_os: "dataframe['rsi_14'] < 30"
+  stoch_os: "dataframe['stoch_k'] < 20"
+  bb_low: "dataframe['bb_pos'] < -1"
+  mfi_os: "dataframe['mfi'] < 20"
+  willr_os: "dataframe['willr'] < -80"
+  zscore_low: "dataframe['zscore'] < -2"
+
+  # Overbought conditions
+  rsi_ob: "dataframe['rsi_14'] > 70"
+  stoch_ob: "dataframe['stoch_k'] > 80"
+  bb_high: "dataframe['bb_pos'] > 1"
+  mfi_ob: "dataframe['mfi'] > 80"
+  willr_ob: "dataframe['willr'] > -20"
+  zscore_high: "dataframe['zscore'] > 2"
+
+  # Trend conditions
+  ema_bull: "dataframe['ema_8'] > dataframe['ema_21']"
+  ema_bear: "dataframe['ema_8'] < dataframe['ema_21']"
+  adx_strong: "dataframe['adx'] > 25"
+  macd_positive: "dataframe['macd_hist'] > 0"
+  macd_negative: "dataframe['macd_hist'] < 0"
+
+  # Volume conditions
+  volume_above_avg: "dataframe['volume'] > dataframe['volume'].rolling(20).mean()"
+  volume_spike: "dataframe['volume'] > dataframe['volume'].rolling(20).mean() * 2"
+
+  # Price action
+  is_green: "dataframe['is_green']"
+  is_red: "dataframe['is_red']"

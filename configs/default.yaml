@@ -1,0 +1,35 @@
+# =============================================================================
+# FILE: configs/default.yaml
+# =============================================================================
+# Default configuration for backtest runner
+
+# Paths
+freqtrade_path: "."
+user_data: "./user_data"
+config_file: "./user_data/config_analysis.json"
+data_dir: "./data/hyperliquid"
+strategies_dir: "./user_data/strategies/generated_v3"
+configs_dir: "./configs"
+
+# Backtest parameters
+timerange: "20250101-20250630"
+min_trades: 0
+min_sharpe: -2
+min_months: 2
+max_workers: 6
+
+# Wallet/Position
+dry_run_wallet: 300
+stake_amount: 30
+max_open_trades: 1
+
+# Regime detection parameters
+regime_lookback: 72
+regime_adx_threshold: 20
+regime_adx_strong: 25
+regime_atr_volatile: 0.75
+regime_atr_low: 0.25
+
+# Feature flags
+enable_regime_filter: false
+debug: false

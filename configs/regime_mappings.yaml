@@ -1,0 +1,74 @@
+# =============================================================================
+# FILE: configs/regime_mappings.yaml
+# =============================================================================
+# Mapping of signal patterns to allowed regimes
+
+regime_filters:
+  # Funding signals - all regimes
+  "funding_*":
+    - bull
+    - bear
+    - range
+    - volatile
+
+  # RSI signals - mean reversion in range/volatile
+  "rsi_*_long":
+    - range
+    - volatile
+  "rsi_*_short":
+    - range
+    - volatile
+
+  # Bollinger signals - mean reversion
+  "bb_*_long":
+    - range
+    - volatile
+  "bb_*_short":
+    - range
+    - volatile
+
+  # Z-Score signals
+  "zscore_*_long":
+    - range
+    - volatile
+  "zscore_*_short":
+    - bull
+    - range
+
+  # Stochastic signals
+  "stoch_os_long":
+    - range
+    - volatile
+  "stoch_ob_short":
+    - range
+    - volatile
+
+  # Reversal signals - counter-trend
+  "reversal_*_long":
+    - bear
+    - range
+  "reversal_*_short":
+    - bull
+    - range
+
+  # Multi-factor signals
+  "multi_os_long":
+    - range
+    - volatile
+  "multi_ob_short":
+    - range
+    - volatile
+
+  # EMA cross - trend following
+  "ema_8_21_long":
+    - bull
+  "ema_8_21_short":
+    - bear
+
+  # MACD cross
+  "macd_cross_long":
+    - bull
+    - range
+  "macd_cross_short":
+    - bear
+    - range
