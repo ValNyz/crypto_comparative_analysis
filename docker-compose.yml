@@ -3,9 +3,11 @@ services:
     image: freqtradeorg/freqtrade:stable_freqai
     container_name: ft-analysis
     volumes:
+      - ./configs:/freqtrade/configs
+      - ./lib:/freqtrade/lib
+      - ./scripts:/freqtrade/scripts
       - ./user_data:/freqtrade/user_data
       - ../hyperliquid_data/user_data/data/hyperliquid:/freqtrade/data/hyperliquid
-      - ./scripts:/freqtrade/scripts
     environment:
       - TZ=Europe/Paris
     entrypoint: []
@@ -18,6 +20,9 @@ services:
     container_name: freqtrade_funding_dryrun
     restart: unless-stopped
     volumes:
+      - ./configs:/freqtrade/configs
+      - ./lib:/freqtrade/lib
+      - ./scripts:/freqtrade/scripts
       - ./user_data:/freqtrade/user_data
       - ../hyperliquid_data/user_data/data/hyperliquid:/freqtrade/data/hyperliquid
     command: >
@@ -30,6 +35,9 @@ services:
     container_name: freqtrade_funding_dryrun
     restart: unless-stopped
     volumes:
+      - ./configs:/freqtrade/configs
+      - ./lib:/freqtrade/lib
+      - ./scripts:/freqtrade/scripts
       - ./user_data:/freqtrade/user_data
       - ../hyperliquid_data/user_data/data/hyperliquid:/freqtrade/data/hyperliquid
     ports:
