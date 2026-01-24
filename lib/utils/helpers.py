@@ -54,28 +54,6 @@ def sanitize_class_name(name: str) -> str:
     return sanitized
 
 
-def format_percent(value: float, width: int = 6, precision: int = 1) -> str:
-    """Format a percentage value."""
-    return f"{value:>{width}.{precision}f}%"
-
-
-def format_profit(value: float, width: int = 7, precision: int = 1) -> str:
-    """Format a profit value with sign."""
-    return f"{value:>+{width}.{precision}f}"
-
-
-def abbrev_regime(regime: str) -> str:
-    """Get abbreviated regime name."""
-    abbrevs = {
-        "bull": "Bu",
-        "bear": "Be",
-        "range": "Ra",
-        "volatile": "Vo",
-        "quiet": "Qu",
-    }
-    return abbrevs.get(regime, regime[:2].capitalize())
-
-
 def chunk_list(lst: List, size: int) -> List[List]:
     """Split a list into chunks of given size."""
     return [lst[i : i + size] for i in range(0, len(lst), size)]

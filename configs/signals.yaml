@@ -1,522 +1,353 @@
 # =============================================================================
-# configs/signals.yaml
+# SIGNALS.YAML - Configuration complète des signaux V3
 # =============================================================================
-# Définition complète de tous les signaux de trading
 #
-# Structure d'un signal:
-#   name: Nom unique du signal
-#   signal_type: Type (funding, rsi, bollinger, ema_cross, etc.)
-#   direction: long, short, ou both
-#   params: Paramètres spécifiques au signal
-#   roi: Return on Investment targets {"0": 0.02}
-#   stoploss: Stop loss (-0.03 = -3%)
-#   exit_config: Nom de la config d'exit à utiliser (référence exits.yaml)
-#   allowed_regimes: Liste des régimes autorisés (optionnel, auto-détecté sinon)
-#   timeframe_override: Override du timeframe (optionnel)
-
+# Format:
+#   - name: Template avec placeholders {param} remplacés par les valeurs
+#   - params: Listes de valeurs → génèrent toutes les combinaisons
+#   - exit_config: "all" = tous les exits, liste = exits spécifiques
+#   - roi/stoploss: Valeur unique ou liste pour combinaisons
+#
 # =============================================================================
+
+# -----------------------------------------------------------------------------
 # FUNDING CONTRARIAN SIGNALS
-# =============================================================================
-
+# -----------------------------------------------------------------------------
 funding_signals:
-  # Paramètres de base pour générer les variantes
-  base_params:
-    zscore_thresholds: [0.75, 1.0, 1.5]
-    lookbacks: [72, 168]
-    default_roi: { "0": 0.02 }
-    default_stoploss: -0.03
-    exit_roi: { "0": 0.2 } # ROI élevé quand exit method utilisée
-
-  # Signaux de base (sans exit method spécifique)
-  signals:
-    - name: "f_z0.75_lb72_base"
-      signal_type: funding
-      direction: both
-      params:
-        zscore: 0.75
-        lookback: 72
-        use_rsi: true
-        rsi_min: 35
-        rsi_max: 65
-      roi: { "0": 0.02 }
-      stoploss: -0.03
-      exit_config: none
-
-    - name: "f_z0.75_lb168_base"
-      signal_type: funding
-      direction: both
-      params:
-        zscore: 0.75
-        lookback: 168
-        use_rsi: true
-        rsi_min: 35
-        rsi_max: 65
-      roi: { "0": 0.02 }
-      stoploss: -0.03
-      exit_config: none
-
-    - name: "f_z1.0_lb72_base"
-      signal_type: funding
-      direction: both
-      params:
-        zscore: 1.0
-        lookback: 72
-        use_rsi: true
-        rsi_min: 35
-        rsi_max: 65
-      roi: { "0": 0.02 }
-      stoploss: -0.03
-      exit_config: none
-
-    - name: "f_z1.0_lb168_base"
-      signal_type: funding
-      direction: both
-      params:
-        zscore: 1.0
-        lookback: 168
-        use_rsi: true
-        rsi_min: 35
-        rsi_max: 65
-      roi: { "0": 0.02 }
-      stoploss: -0.03
-      exit_config: none
-
-    - name: "f_z1.5_lb72_base"
-      signal_type: funding
-      direction: both
-      params:
-        zscore: 1.5
-        lookback: 72
-        use_rsi: true
-        rsi_min: 35
-        rsi_max: 65
-      roi: { "0": 0.02 }
-      stoploss: -0.03
-      exit_config: none
-
-    - name: "f_z1.5_lb168_base"
-      signal_type: funding
-      direction: both
-      params:
-        zscore: 1.5
-        lookback: 168
-        use_rsi: true
-        rsi_min: 35
-        rsi_max: 65
-      roi: { "0": 0.02 }
-      stoploss: -0.03
-      exit_config: none
-
-  # Template pour génération automatique avec exits
-  # Le code génèrera automatiquement les variantes avec chaque exit method
-  generate_with_exits:
-    enabled: true
-    base_signals:
-      - { zscore: 0.75, lookback: 72 }
-      - { zscore: 0.75, lookback: 168 }
-      - { zscore: 1.0, lookback: 72 }
-      - { zscore: 1.0, lookback: 168 }
-      - { zscore: 1.5, lookback: 72 }
-      - { zscore: 1.5, lookback: 168 }
-    common_params:
+  # === Base funding signals (ROI/SL only) ===
+  - name: "f_z{zscore}_lb{lookback}_base"
+    signal_type: funding
+    direction: both
+    params:
+      zscore: [0.75, 1.0, 1.5]
+      lookback: [72, 168]
       use_rsi: true
       rsi_min: 35
       rsi_max: 65
-    roi_with_exit: { "0": 0.2 }
+    roi: { "0": 0.02 }
     stoploss: -0.03
+    exit_config: none
 
-# =============================================================================
+  # === Funding with all exit methods ===
+  - name: "f_z{zscore}_lb{lookback}_x{exit_config}"
+    signal_type: funding
+    direction: both
+    params:
+      zscore: [0.75, 1.0, 1.5]
+      lookback: [72, 168]
+      use_rsi: true
+      rsi_min: 35
+      rsi_max: 65
+    roi: { "0": 0.2 } # High ROI to let exits decide
+    stoploss: -0.03
+    exit_config: all # Expands to all exit configs
+    enabled: false
+
+  # === Funding with volume filter ===
+  - name: "f_z{zscore}_lb{lookback}_vol"
+    signal_type: funding
+    direction: both
+    params:
+      zscore: [1.0, 1.5]
+      lookback: [72, 168]
+      use_rsi: true
+      rsi_min: 35
+      rsi_max: 65
+      use_volume: true
+      volume_min: 0.5
+      volume_max: 3.0
+    roi: { "0": 0.02 }
+    stoploss: -0.03
+    exit_config: none
+    enabled: false # Désactivé par défaut
+
+  # === Funding with ATR filter ===
+  - name: "f_z{zscore}_lb{lookback}_atr"
+    signal_type: funding
+    direction: both
+    params:
+      zscore: [1.0, 1.5, 2.0]
+      lookback: [72, 168]
+      use_atr: true
+      atr_min: 0.2
+      atr_max: 0.8
+    roi: { "0": 0.02 }
+    stoploss: -0.03
+    exit_config: none
+    enabled: false
+
+  # === Funding with Bollinger filter ===
+  - name: "f_z{zscore}_lb{lookback}_bb{bb_long_max}"
+    signal_type: funding
+    direction: both
+    params:
+      zscore: [1.0, 1.5]
+      lookback: [72, 168]
+      use_bb: true
+      bb_long_max: [0.0, -0.25, -0.5]
+      bb_short_min: [0.0, 0.25, 0.5] # Inverse automatique
+    roi: { "0": 0.02 }
+    stoploss: -0.03
+    exit_config: none
+    enabled: false
+
+  # === Funding with Stochastic filter ===
+  - name: "f_z{zscore}_lb{lookback}_stoch{stoch_long_max}"
+    signal_type: funding
+    direction: both
+    params:
+      zscore: [1.0, 1.5]
+      lookback: [72, 168]
+      use_stoch: true
+      stoch_long_max: [30, 40, 50]
+      stoch_short_min: [70, 60, 50] # 100 - stoch_long_max
+    roi: { "0": 0.02 }
+    stoploss: -0.03
+    exit_config: none
+    enabled: false
+
+  # === Funding with candle confirmation ===
+  - name: "f_z{zscore}_lb{lookback}_candle"
+    signal_type: funding
+    direction: both
+    params:
+      zscore: [1.0, 1.5]
+      lookback: [72, 168]
+      use_candle: true
+    roi: { "0": 0.02 }
+    stoploss: -0.03
+    exit_config: none
+    enabled: false
+
+  # === Funding with anti-trend filter ===
+  - name: "f_z{zscore}_lb{lookback}_antitrend{adx_max}"
+    signal_type: funding
+    direction: both
+    params:
+      zscore: [1.0, 1.5]
+      lookback: [72, 168]
+      use_antitrend: true
+      adx_max: [25, 30, 35]
+    roi: { "0": 0.02 }
+    stoploss: -0.03
+    exit_config: none
+    enabled: false
+
+  # === Funding with RSI + Volume combo ===
+  - name: "f_z{zscore}_lb{lookback}_rsi_vol"
+    signal_type: funding
+    direction: both
+    params:
+      zscore: [1.0, 1.5]
+      lookback: [72, 168]
+      use_rsi: true
+      rsi_min: 35
+      rsi_max: 65
+      use_volume: true
+      volume_min: 0.5
+    roi: { "0": 0.02 }
+    stoploss: -0.03
+    exit_config: none
+    enabled: false
+
+  # === Funding strict multi-filter ===
+  - name: "f_z{zscore}_lb{lookback}_strict"
+    signal_type: funding
+    direction: both
+    params:
+      zscore: [1.5, 2.0]
+      lookback: [72, 168]
+      use_rsi: true
+      rsi_min: 40
+      rsi_max: 60
+      use_volume: true
+      volume_min: 0.7
+      use_atr: true
+      atr_min: 0.25
+      atr_max: 0.75
+      use_antitrend: true
+      adx_max: 30
+    roi: { "0": 0.025 }
+    stoploss: -0.025
+    exit_config: none
+    enabled: false
+
+# -----------------------------------------------------------------------------
 # TECHNICAL SIGNALS - RSI
-# =============================================================================
-
-rsi_signals:
-  - name: rsi_25_long
+# -----------------------------------------------------------------------------
+technical_signals:
+  # === RSI Oversold Long ===
+  - name: "rsi_{threshold}_long"
     signal_type: rsi
     direction: long
     params:
-      threshold: 25
+      threshold: [25, 30, 35]
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: rsi_30_long
-    signal_type: rsi
-    direction: long
-    params:
-      threshold: 30
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-  - name: rsi_35_long
-    signal_type: rsi
-    direction: long
-    params:
-      threshold: 35
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-  - name: rsi_65_short
+  # === RSI Overbought Short ===
+  - name: "rsi_{threshold}_short"
     signal_type: rsi
     direction: short
     params:
-      threshold: 65
+      threshold: [65, 70, 75]
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: rsi_70_short
-    signal_type: rsi
-    direction: short
-    params:
-      threshold: 70
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-  - name: rsi_75_short
-    signal_type: rsi
-    direction: short
-    params:
-      threshold: 75
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-# =============================================================================
-# TECHNICAL SIGNALS - BOLLINGER BANDS
-# =============================================================================
-
-bollinger_signals:
-  - name: bb_1.0_long
+  # === Bollinger Band Long ===
+  - name: "bb_{threshold}_long"
     signal_type: bollinger
     direction: long
     params:
-      threshold: 1.0
+      threshold: [1.0, 1.5, 2.0]
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: bb_1.5_long
-    signal_type: bollinger
-    direction: long
-    params:
-      threshold: 1.5
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-  - name: bb_2.0_long
-    signal_type: bollinger
-    direction: long
-    params:
-      threshold: 2.0
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-  - name: bb_1.0_short
+  # === Bollinger Band Short ===
+  - name: "bb_{threshold}_short"
     signal_type: bollinger
     direction: short
     params:
-      threshold: 1.0
+      threshold: [1.0, 1.5, 2.0]
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: bb_1.5_short
-    signal_type: bollinger
-    direction: short
-    params:
-      threshold: 1.5
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-  - name: bb_2.0_short
-    signal_type: bollinger
-    direction: short
-    params:
-      threshold: 2.0
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-# =============================================================================
-# TECHNICAL SIGNALS - EMA CROSS
-# =============================================================================
-
-ema_signals:
-  - name: ema_8_21_long
+  # === EMA Cross ===
+  - name: "ema_8_21_long"
     signal_type: ema_cross
     direction: long
     params: {}
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: ema_8_21_short
+  - name: "ema_8_21_short"
     signal_type: ema_cross
     direction: short
     params: {}
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# TECHNICAL SIGNALS - STOCHASTIC
-# =============================================================================
-
-stochastic_signals:
-  - name: stoch_os_long
+  # === Stochastic ===
+  - name: "stoch_os_long"
     signal_type: stochastic
     direction: long
     params:
       threshold: 20
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: stoch_ob_short
+  - name: "stoch_ob_short"
     signal_type: stochastic
     direction: short
     params:
       threshold: 80
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# TECHNICAL SIGNALS - MACD
-# =============================================================================
-
-macd_signals:
-  - name: macd_cross_long
+  # === MACD Cross ===
+  - name: "macd_cross_long"
     signal_type: macd
     direction: long
     params: {}
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: macd_cross_short
+  - name: "macd_cross_short"
     signal_type: macd
     direction: short
     params: {}
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# TECHNICAL SIGNALS - REVERSAL
-# =============================================================================
-
-reversal_signals:
-  - name: reversal_3_long
+  # === Reversal (consecutive candles) ===
+  - name: "reversal_{candles}_long"
     signal_type: reversal
     direction: long
     params:
-      candles: 3
+      candles: [3, 4, 5]
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: reversal_4_long
-    signal_type: reversal
-    direction: long
-    params:
-      candles: 4
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-  - name: reversal_5_long
-    signal_type: reversal
-    direction: long
-    params:
-      candles: 5
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-  - name: reversal_3_short
+  - name: "reversal_{candles}_short"
     signal_type: reversal
     direction: short
     params:
-      candles: 3
+      candles: [3, 4, 5]
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: reversal_4_short
-    signal_type: reversal
-    direction: short
-    params:
-      candles: 4
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-  - name: reversal_5_short
-    signal_type: reversal
-    direction: short
-    params:
-      candles: 5
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-# =============================================================================
-# TECHNICAL SIGNALS - ZSCORE PRICE
-# =============================================================================
-
-zscore_signals:
-  - name: zscore_2.0_long
+  # === Z-Score Price ===
+  - name: "zscore_{threshold}_long"
     signal_type: zscore
     direction: long
     params:
-      threshold: 2.0
+      threshold: [2.0, 2.5]
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: zscore_2.5_long
-    signal_type: zscore
-    direction: long
-    params:
-      threshold: 2.5
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-  - name: zscore_2.0_short
+  - name: "zscore_{threshold}_short"
     signal_type: zscore
     direction: short
     params:
-      threshold: 2.0
+      threshold: [2.0, 2.5]
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: zscore_2.5_short
-    signal_type: zscore
-    direction: short
-    params:
-      threshold: 2.5
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-# =============================================================================
-# TECHNICAL SIGNALS - MULTI-FACTOR
-# =============================================================================
-
-multi_signals:
-  - name: multi_os_long
+  # === Multi-factor (3+ indicators) ===
+  - name: "multi_os_long"
     signal_type: multi
     direction: long
     params: {}
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: multi_ob_short
+  - name: "multi_ob_short"
     signal_type: multi
     direction: short
     params: {}
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# ADVANCED SIGNALS - WILLIAMS %R
-# =============================================================================
-
-williams_signals:
-  - name: willr_os_long
+# -----------------------------------------------------------------------------
+# ADVANCED SIGNALS
+# -----------------------------------------------------------------------------
+advanced_signals:
+  # === Williams %R ===
+  - name: "willr_os_long"
     signal_type: williams_r
     direction: long
     params:
       threshold: -80
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: willr_ob_short
+  - name: "willr_ob_short"
     signal_type: williams_r
     direction: short
     params:
       threshold: -20
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# ADVANCED SIGNALS - CCI
-# =============================================================================
-
-cci_signals:
-  - name: cci_100_long
+  # === CCI (Commodity Channel Index) ===
+  - name: "cci_{threshold}_long"
     signal_type: cci
     direction: long
     params:
-      threshold: -100
+      threshold: [-100, -150, -200] # Negative for oversold
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: cci_150_long
-    signal_type: cci
-    direction: long
-    params:
-      threshold: -150
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-  - name: cci_200_long
-    signal_type: cci
-    direction: long
-    params:
-      threshold: -200
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-  - name: cci_100_short
+  - name: "cci_{threshold}_short"
     signal_type: cci
     direction: short
     params:
-      threshold: 100
+      threshold: [100, 150, 200] # Positive for overbought
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: cci_150_short
-    signal_type: cci
-    direction: short
-    params:
-      threshold: 150
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-  - name: cci_200_short
-    signal_type: cci
-    direction: short
-    params:
-      threshold: 200
-    roi: { "0": 0.02 }
-    stoploss: -0.03
-    exit_config: none
-
-# =============================================================================
-# ADVANCED SIGNALS - ROC
-# =============================================================================
-
-roc_signals:
-  - name: roc_reversal_long
+  # === ROC (Rate of Change) Reversal ===
+  - name: "roc_reversal_long"
     signal_type: roc
     direction: long
     params:
@@ -524,9 +355,8 @@ roc_signals:
       threshold: -5
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: roc_reversal_short
+  - name: "roc_reversal_short"
     signal_type: roc
     direction: short
     params:
@@ -534,14 +364,9 @@ roc_signals:
       threshold: 5
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# ADVANCED SIGNALS - DIVERGENCE
-# =============================================================================
-
-divergence_signals:
-  - name: rsi_div_bull
+  # === RSI Divergence ===
+  - name: "rsi_div_bull"
     signal_type: divergence
     direction: long
     params:
@@ -549,9 +374,8 @@ divergence_signals:
       lookback: 14
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: rsi_div_bear
+  - name: "rsi_div_bear"
     signal_type: divergence
     direction: short
     params:
@@ -559,9 +383,9 @@ divergence_signals:
       lookback: 14
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: obv_div_bull
+  # === OBV Divergence ===
+  - name: "obv_div_bull"
     signal_type: divergence
     direction: long
     params:
@@ -569,9 +393,8 @@ divergence_signals:
       lookback: 20
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: obv_div_bear
+  - name: "obv_div_bear"
     signal_type: divergence
     direction: short
     params:
@@ -579,171 +402,128 @@ divergence_signals:
       lookback: 20
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# ADVANCED SIGNALS - SQUEEZE
-# =============================================================================
-
-squeeze_signals:
-  - name: squeeze_long
+  # === Squeeze Momentum (John Carter) ===
+  - name: "squeeze_long"
     signal_type: squeeze
     direction: long
     params: {}
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: squeeze_short
+  - name: "squeeze_short"
     signal_type: squeeze
     direction: short
     params: {}
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# ADVANCED SIGNALS - KELTNER
-# =============================================================================
-
-keltner_signals:
-  - name: keltner_break_long
+  # === Keltner Channel Breakout ===
+  - name: "keltner_break_long"
     signal_type: keltner
     direction: long
     params:
       mult: 2.0
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: keltner_break_short
+  - name: "keltner_break_short"
     signal_type: keltner
     direction: short
     params:
       mult: 2.0
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# ADVANCED SIGNALS - DONCHIAN
-# =============================================================================
-
-donchian_signals:
-  - name: donchian_20_long
+  # === Donchian Channel (Turtle Trading) ===
+  - name: "donchian_{period}_long"
     signal_type: donchian
     direction: long
     params:
-      period: 20
+      period: [20]
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: donchian_20_short
+  - name: "donchian_{period}_short"
     signal_type: donchian
     direction: short
     params:
-      period: 20
+      period: [20]
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# ADVANCED SIGNALS - VWAP
-# =============================================================================
-
-vwap_signals:
-  - name: vwap_long
+  # === VWAP Reversion ===
+  - name: "vwap_long"
     signal_type: vwap
     direction: long
     params:
       dev: -2.0
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: vwap_short
+  - name: "vwap_short"
     signal_type: vwap
     direction: short
     params:
       dev: 2.0
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# ADVANCED SIGNALS - VOLUME SPIKE
-# =============================================================================
-
-volume_spike_signals:
-  - name: vol_spike_long
+  # === Volume Spike ===
+  - name: "vol_spike_long"
     signal_type: volume_spike
     direction: long
     params:
       vol_mult: 2.0
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: vol_spike_short
+  - name: "vol_spike_short"
     signal_type: volume_spike
     direction: short
     params:
       vol_mult: 2.0
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# ADVANCED SIGNALS - OI DIVERGENCE
-# =============================================================================
-
-oi_signals:
-  - name: oi_div_long
+  # === Open Interest Divergence ===
+  - name: "oi_div_long"
     signal_type: oi_divergence
     direction: long
     params: {}
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: oi_div_short
+  - name: "oi_div_short"
     signal_type: oi_divergence
     direction: short
     params: {}
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# ADVANCED SIGNALS - LIQUIDATION
-# =============================================================================
-
-liquidation_signals:
-  - name: liq_cascade_long
+  # === Liquidation Cascade ===
+  - name: "liq_cascade_long"
     signal_type: liquidation
     direction: long
     params:
       threshold: 2.0
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: liq_cascade_short
+  - name: "liq_cascade_short"
     signal_type: liquidation
     direction: short
     params:
       threshold: 2.0
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-# =============================================================================
-# COMBO SIGNALS
-# =============================================================================
-
+# -----------------------------------------------------------------------------
+# COMBO / CONFLUENCE SIGNALS
+# -----------------------------------------------------------------------------
 combo_signals:
-  - name: combo_mr_3of5_long
+  # === Mean Reversion Confluence Long (3 of 5 oversold) ===
+  - name: "combo_mr_3of5_long"
     signal_type: combo
     direction: long
     params:
@@ -757,9 +537,9 @@ combo_signals:
       confirm: is_green
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: combo_mr_3of5_short
+  # === Mean Reversion Confluence Short (3 of 5 overbought) ===
+  - name: "combo_mr_3of5_short"
     signal_type: combo
     direction: short
     params:
@@ -773,9 +553,9 @@ combo_signals:
       confirm: is_red
     roi: { "0": 0.02 }
     stoploss: -0.03
-    exit_config: none
 
-  - name: combo_trend_mom_long
+  # === Trend + Momentum Long ===
+  - name: "combo_trend_mom_long"
     signal_type: combo
     direction: long
     params:
@@ -786,9 +566,9 @@ combo_signals:
         - volume_above_avg
     roi: { "0": 0.03 }
     stoploss: -0.04
-    exit_config: none
 
-  - name: combo_trend_mom_short
+  # === Trend + Momentum Short ===
+  - name: "combo_trend_mom_short"
     signal_type: combo
     direction: short
     params:
@@ -799,9 +579,9 @@ combo_signals:
         - volume_above_avg
     roi: { "0": 0.03 }
     stoploss: -0.04
-    exit_config: none
 
-  - name: combo_vol_os_long
+  # === Volume Spike + Oversold Long ===
+  - name: "combo_vol_os_long"
     signal_type: combo
     direction: long
     params:
@@ -815,4 +595,39 @@ combo_signals:
         - is_green
     roi: { "0": 0.025 }
     stoploss: -0.03
-    exit_config: none
+
+  # === Strong Reversal Long (4 of 6) ===
+  - name: "combo_strong_rev_long"
+    signal_type: combo
+    direction: long
+    params:
+      min_signals: 4
+      signals:
+        - rsi_os
+        - bb_low
+        - stoch_os
+        - zscore_low
+        - willr_os
+        - mfi_os
+      confirm: is_green
+    roi: { "0": 0.025 }
+    stoploss: -0.035
+    enabled: false
+
+  # === Strong Reversal Short (4 of 6) ===
+  - name: "combo_strong_rev_short"
+    signal_type: combo
+    direction: short
+    params:
+      min_signals: 4
+      signals:
+        - rsi_ob
+        - bb_high
+        - stoch_ob
+        - zscore_high
+        - willr_ob
+        - mfi_ob
+      confirm: is_red
+    roi: { "0": 0.025 }
+    stoploss: -0.035
+    enabled: false

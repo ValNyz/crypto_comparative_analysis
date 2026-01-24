@@ -201,39 +201,39 @@ def _get_default_exits() -> Dict[str, ExitConfig]:
         ),
         # Funding velocity
         "fvel4_2": ExitConfig(
-            name="fvel_4_02",
+            name="fvel_4_2",
             use_funding_velocity=True,
             funding_vel_period=4,
             funding_vel_threshold=0.2,
         ),
         "fvel8_3": ExitConfig(
-            name="fvel_8_03",
+            name="fvel_8_3",
             use_funding_velocity=True,
             funding_vel_period=8,
             funding_vel_threshold=0.3,
         ),
         "fvel12_4": ExitConfig(
-            name="fvel_12_04",
+            name="fvel_12_4",
             use_funding_velocity=True,
             funding_vel_period=12,
             funding_vel_threshold=0.4,
         ),
         # Funding acceleration
-        "faccel4": ExitConfig(
+        "faccel_4": ExitConfig(
             name="faccel_4", use_funding_accel=True, funding_accel_period=4
         ),
-        "faccel8": ExitConfig(
+        "faccel_8": ExitConfig(
             name="faccel_8", use_funding_accel=True, funding_accel_period=8
         ),
         # Funding neutral
         "fneu_03": ExitConfig(
-            name="fneutral_03", use_funding_neutral=True, funding_neutral_zone=0.3
+            name="fneu_03", use_funding_neutral=True, funding_neutral_zone=0.3
         ),
         "fneu_05": ExitConfig(
-            name="fneutral_05", use_funding_neutral=True, funding_neutral_zone=0.5
+            name="fneu_05", use_funding_neutral=True, funding_neutral_zone=0.5
         ),
         "fneu_08": ExitConfig(
-            name="fneutral_08", use_funding_neutral=True, funding_neutral_zone=0.8
+            name="fneu_08", use_funding_neutral=True, funding_neutral_zone=0.8
         ),
         # Volatility exits
         "vol_15": ExitConfig(
@@ -247,34 +247,34 @@ def _get_default_exits() -> Dict[str, ExitConfig]:
         ),
         # Volume spike
         "volspi25": ExitConfig(
-            name="volspike_25", use_volume_spike_exit=True, volume_spike_mult=2.5
+            name="volspi25", use_volume_spike_exit=True, volume_spike_mult=2.5
         ),
         "volspi30": ExitConfig(
-            name="volspike_30", use_volume_spike_exit=True, volume_spike_mult=3.0
+            name="volspi30", use_volume_spike_exit=True, volume_spike_mult=3.0
         ),
         # Crypto trailing
         "ctrail15": ExitConfig(
-            name="ctrail_15", use_crypto_trail=True, crypto_trail_mult=1.5
+            name="ctrail15", use_crypto_trail=True, crypto_trail_mult=1.5
         ),
         "ctrail20": ExitConfig(
-            name="ctrail_20", use_crypto_trail=True, crypto_trail_mult=2.0
+            name="ctrail20", use_crypto_trail=True, crypto_trail_mult=2.0
         ),
         "ctrail25": ExitConfig(
-            name="ctrail_25", use_crypto_trail=True, crypto_trail_mult=2.5
+            name="ctrail25", use_crypto_trail=True, crypto_trail_mult=2.5
         ),
         "ctrail30": ExitConfig(
-            name="ctrail_30", use_crypto_trail=True, crypto_trail_mult=3.0
+            name="ctrail30", use_crypto_trail=True, crypto_trail_mult=3.0
         ),
         # RSI divergence
         "rsidiv10": ExitConfig(
-            name="rsidiv_10", use_rsi_divergence=True, divergence_lookback=10
+            name="rsidiv10", use_rsi_divergence=True, divergence_lookback=10
         ),
         "rsidiv14": ExitConfig(
-            name="rsidiv_14", use_rsi_divergence=True, divergence_lookback=14
+            name="rsidiv14", use_rsi_divergence=True, divergence_lookback=14
         ),
         # Crypto combos
-        "fvel_neutral": ExitConfig(
-            name="fvel_neutral",
+        "fvel_neu": ExitConfig(
+            name="fvel_neu",
             use_funding_velocity=True,
             funding_vel_period=8,
             funding_vel_threshold=0.3,
@@ -282,14 +282,14 @@ def _get_default_exits() -> Dict[str, ExitConfig]:
             funding_neutral_zone=0.5,
         ),
         "faccelvol": ExitConfig(
-            name="faccel_vol",
+            name="faccelvol",
             use_funding_accel=True,
             funding_accel_period=4,
             use_vol_regime_exit=True,
             vol_expansion_mult=2.0,
         ),
-        "triplecrypto": ExitConfig(
-            name="triple_crypto",
+        "triplecr": ExitConfig(
+            name="triplecr",
             use_funding_velocity=True,
             funding_vel_period=8,
             funding_vel_threshold=0.3,
@@ -298,8 +298,8 @@ def _get_default_exits() -> Dict[str, ExitConfig]:
             use_crypto_trail=True,
             crypto_trail_mult=2.5,
         ),
-        "crypto_cons": ExitConfig(
-            name="crypto_cons",
+        "cryptoco": ExitConfig(
+            name="cryptoco",
             use_funding_velocity=True,
             funding_vel_period=12,
             funding_vel_threshold=0.4,
@@ -310,8 +310,8 @@ def _get_default_exits() -> Dict[str, ExitConfig]:
             use_crypto_trail=True,
             crypto_trail_mult=3.0,
         ),
-        "crypto_aggr": ExitConfig(
-            name="crypto_aggr",
+        "cryptoag": ExitConfig(
+            name="cryptoag",
             use_funding_velocity=True,
             funding_vel_period=4,
             funding_vel_threshold=0.2,

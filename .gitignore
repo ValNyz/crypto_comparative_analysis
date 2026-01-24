@@ -1,4 +1,6 @@
+data/
 user_data/strategies
+user_data/analysis_results
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

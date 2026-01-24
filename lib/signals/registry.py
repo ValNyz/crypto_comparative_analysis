@@ -3,7 +3,9 @@
 # =============================================================================
 """Signal registry - combines all signal types and loads from YAML."""
 
-from typing import List, Optional, Dict, Any
+import itertools
+from copy import deepcopy
+from typing import List, Optional, Dict, Union, Any
 from pathlib import Path
 from .base import SignalConfig
 from .funding import get_funding_signals
@@ -18,6 +20,7 @@ def get_signal_configs(
     signal_filter: Optional[str] = None,
     include_exits: bool = True,
     configs_dir: str = "./configs",
+    signals_file: str = "./configs/signals.yaml",
 ) -> List[SignalConfig]:
     """
     Get all signal configurations.
@@ -33,10 +36,10 @@ def get_signal_configs(
     signals = []
 
     # Try to load from YAML first
-    yaml_path = Path(configs_dir) / "signals.yaml"
+    yaml_path = Path(signals_file)
     if yaml_path.exists():
         yaml_signals = load_signals_from_yaml(
-            str(yaml_path), signal_filter, include_exits, configs_dir
+            str(yaml_path), signal_filter, configs_dir
         )
         if yaml_signals:
             return yaml_signals
@@ -60,24 +63,20 @@ def get_signal_configs(
 
 
 def load_signals_from_yaml(
-    filepath: str,
-    signal_filter: Optional[str] = None,
-    include_exits: bool = True,
-    configs_dir: str = "./configs",
+    filepath: str, signal_filter: Optional[str] = None, configs_dir: str = "./configs"
 ) -> List[SignalConfig]:
     """
-    Load signal configurations from YAML file.
+    Load signal configurations from YAML file with advanced expansion.
 
-    Supports multiple structures:
-    1. Simple: signals: [...]
-    2. Grouped: funding_signals: {signals: [...]}
-    3. With auto-generation: generate_with_exits: {...}
+    Supports:
+    - Parameter lists for automatic expansion
+    - Name placeholders like {zscore}, {lookback}
+    - exit_config: "all" to generate all exit variations
 
     Args:
         filepath: Path to signals YAML file
-        signal_filter: Optional filter by signal_type
-        include_exits: Whether to generate exit variations
-        configs_dir: Directory for config files (to load exit names)
+        signal_filter: Optional filter by category
+        configs_dir: Directory for config files (to load exits)
 
     Returns:
         List of SignalConfig instances
@@ -85,178 +84,261 @@ def load_signals_from_yaml(
     data = load_yaml(filepath)
     signals = []
 
-    # === Structure 1: Simple flat list ===
-    # signals:
-    #   - name: "..."
-    if "signals" in data and isinstance(data["signals"], list):
-        signals.extend(_parse_signal_list(data["signals"], signal_filter))
+    # Map of category names to signal_type
+    category_map = {
+        "funding_signals": "funding",
+        "technical_signals": None,  # Keep original type
+        "advanced_signals": None,
+        "combo_signals": "combo",
+    }
 
-    # === Structure 2: Grouped by type ===
-    # funding_signals:
-    #   signals: [...]
-    # technical_signals:
-    #   signals: [...]
-    for key in [
-        "funding_signals",
-        "technical_signals",
-        "advanced_signals",
-        "combo_signals",
-    ]:
-        if key in data:
-            group_data = data[key]
+    # Get available exit configs for "all" expansion
+    available_exits = get_exit_names(configs_dir)
 
-            # Parse explicit signals
-            if "signals" in group_data:
-                group_signals = _parse_signal_list(group_data["signals"], signal_filter)
-                signals.extend(group_signals)
-
-            # Handle auto-generation with exits
-            if include_exits and "generate_with_exits" in group_data:
-                gen_config = group_data["generate_with_exits"]
-                if gen_config.get("enabled", False):
-                    generated = _generate_signals_with_exits(
-                        gen_config, signal_filter, configs_dir
-                    )
-                    signals.extend(generated)
-
-    # === Structure 3: Top-level generate_with_exits ===
-    if include_exits and "generate_with_exits" in data:
-        gen_config = data["generate_with_exits"]
-        if gen_config.get("enabled", False):
-            generated = _generate_signals_with_exits(
-                gen_config, signal_filter, configs_dir
-            )
-            signals.extend(generated)
-
-    return signals
-
-
-def _parse_signal_list(
-    signal_list: List[Dict[str, Any]], signal_filter: Optional[str] = None
-) -> List[SignalConfig]:
-    """Parse a list of signal dicts into SignalConfig objects."""
-    signals = []
-
-    for sig_data in signal_list:
-        # Filter by type if specified
-        if signal_filter and sig_data.get("signal_type") != signal_filter:
+    for category, signal_type_override in category_map.items():
+        if category not in data:
             continue
 
-        signals.append(SignalConfig.from_dict(sig_data))
+        # Filter by category if requested
+        if signal_filter:
+            if signal_filter == "funding" and category != "funding_signals":
+                continue
+            elif signal_filter == "technical" and category != "technical_signals":
+                continue
+            elif signal_filter == "advanced" and category != "advanced_signals":
+                continue
+            elif signal_filter == "combo" and category != "combo_signals":
+                continue
+
+        for sig_template in data[category]:
+            if not sig_template.get("enabled", True):
+                continue
+
+            expanded = expand_signal_template(
+                sig_template,
+                signal_type_override
+                or sig_template.get("signal_type", _infer_signal_type(category)),
+                available_exits,
+            )
+            signals.extend(expanded)
 
     return signals
 
 
-def _generate_signals_with_exits(
-    gen_config: Dict[str, Any],
-    signal_filter: Optional[str] = None,
-    configs_dir: str = "./configs",
+def expand_signal_template(
+    template: Dict[str, Any],
+    signal_type: str,
+    available_exits: List[str],
 ) -> List[SignalConfig]:
     """
-    Generate signal variations with different exit methods.
+    Expand a signal template into multiple SignalConfig instances.
 
-    Config structure:
-    generate_with_exits:
-      enabled: true
-      signal_type: funding  # optional, defaults to funding
-      base_signals:
-        - {zscore: 0.75, lookback: 72}
-        - {zscore: 1.0, lookback: 168}
-      common_params:
-        use_rsi: true
-        rsi_min: 35
-        rsi_max: 65
-      roi_with_exit: {"0": 0.2}
-      stoploss: -0.03
-      exit_methods: [...]  # optional, defaults to all
+    Handles:
+    - Parameter lists (cartesian product expansion)
+    - Name placeholders
+    - exit_config: "all"
+
+    Args:
+        template: Signal template from YAML
+        signal_type: Type of signal
+        available_exits: List of available exit config names
+
+    Returns:
+        List of expanded SignalConfig instances
     """
     signals = []
 
-    signal_type = gen_config.get("signal_type", "funding")
+    # Paramètres qui sont des listes de valeurs, pas des options à expandre
+    PROTECTED_LIST_PARAMS = {"signals", "conditions", "extra_conditions"}
 
-    # Filter check
-    if signal_filter and signal_type != signal_filter:
-        return signals
+    # Extract template fields
+    name_template = template.get("name", "unnamed")
+    direction = template.get("direction", "both")
+    params = template.get("params", {})
+    roi = template.get("roi", {"0": 0.02})
+    stoploss = template.get("stoploss", -0.03)
+    timeframe_override = template.get("timeframe_override")
+    allowed_regimes = template.get("allowed_regimes")
+    exit_config = template.get("exit_config", "none")
 
-    base_signals = gen_config.get("base_signals", [])
-    common_params = gen_config.get("common_params", {})
-    roi_with_exit = gen_config.get("roi_with_exit", {"0": 0.2})
-    stoploss = gen_config.get("stoploss", -0.03)
+    # Separate expandable params (lists) from fixed params
+    expand_params = {}
+    fixed_params = {}
 
-    # Get exit methods to use
-    specified_exits = gen_config.get("exit_methods")
-    if specified_exits:
-        exit_methods = specified_exits
-    else:
-        # Load all available exits except 'none'
-        exit_methods = [e for e in get_exit_names(configs_dir) if e != "none"]
+    for key, value in params.items():
+        if isinstance(value, list) and key not in PROTECTED_LIST_PARAMS:
+            expand_params[key] = value
+        else:
+            fixed_params[key] = value
 
-    # Generate signals
-    for base in base_signals:
-        zscore = base.get("zscore", 1.5)
-        lookback = base.get("lookback", 72)
+        # Handle ROI expansion
+    roi_list = _ensure_list(roi)
 
-        # Merge base params with common params
-        params = {
-            "zscore": zscore,
-            "lookback": lookback,
-            **common_params,
-            **base,  # Allow base to override common
-        }
-        # Remove zscore/lookback from params if they were in base (they're already set)
-        params.pop("zscore", None)
-        params.pop("lookback", None)
-        params["zscore"] = zscore
-        params["lookback"] = lookback
+    # Handle stoploss expansion
+    stoploss_list = _ensure_list(stoploss)
 
-        # Generate variant for each exit method
-        for exit_name in exit_methods:
-            # Truncate exit name for signal name (max 8 chars like original)
-            exit_short = exit_name[:8]
+    # Handle exit_config expansion
+    exit_list = _expand_exit_configs(exit_config, available_exits)
 
+    # Generate all combinations
+    signals = []
+
+    # Build list of (param_name, values) for expansion
+    expansion_items = list(expand_params.items())
+
+    # Add roi, stoploss, exit to expansion if they have multiple values
+    if len(roi_list) > 1:
+        expansion_items.append(("_roi", roi_list))
+    if len(stoploss_list) > 1:
+        expansion_items.append(("_stoploss", stoploss_list))
+    if len(exit_list) > 1:
+        expansion_items.append(("_exit", exit_list))
+
+    if expansion_items:
+        # Generate cartesian product of all expandable values
+        keys = [item[0] for item in expansion_items]
+        value_lists = [item[1] for item in expansion_items]
+
+        for combination in itertools.product(*value_lists):
+            # Build params for this combination
+            combo_params = deepcopy(fixed_params)
+            combo_dict = dict(zip(keys, combination))
+
+            # Extract special keys
+            roi = combo_dict.pop("_roi", roi_list[0])
+            stoploss = combo_dict.pop("_stoploss", stoploss_list[0])
+            exit_config = combo_dict.pop("_exit", exit_list[0])
+
+            # Add remaining to params
+            combo_params.update(combo_dict)
+
+            # Build name from template
+            name = _format_name(name_template, combo_params, exit_config)
+
+            # Create signal config
             signal = SignalConfig(
-                name=f"f_z{zscore}_lb{lookback}_x{exit_short}",
+                name=name,
                 signal_type=signal_type,
-                direction="both",
-                params=params.copy(),
-                roi=roi_with_exit,
+                direction=direction,
+                params=combo_params,
+                roi=roi if isinstance(roi, dict) else {"0": roi},
                 stoploss=stoploss,
-                exit_config=exit_name,
+                timeframe_override=timeframe_override,
+                allowed_regimes=allowed_regimes,
+                exit_config=exit_config,
             )
             signals.append(signal)
+    else:
+        # No expansion needed - single config
+        name = _format_name(name_template, fixed_params, exit_list[0])
+
+        signal = SignalConfig(
+            name=name,
+            signal_type=signal_type,
+            direction=direction,
+            params=fixed_params,
+            roi=roi_list[0] if isinstance(roi_list[0], dict) else {"0": roi_list[0]},
+            stoploss=stoploss_list[0],
+            timeframe_override=timeframe_override,
+            allowed_regimes=allowed_regimes,
+            exit_config=exit_list[0],
+        )
+        signals.append(signal)
 
     return signals
 
 
-def get_funding_signals_only(
-    include_exits: bool = True, configs_dir: str = "./configs"
-) -> List[SignalConfig]:
-    """Get only funding contrarian signals."""
-    return get_signal_configs(
-        signal_filter="funding", include_exits=include_exits, configs_dir=configs_dir
-    )
+def _ensure_list(value: Any) -> List:
+    """Ensure value is a list."""
+    if isinstance(value, list):
+        return value
+    return [value]
 
 
-def get_technical_signals_only() -> List[SignalConfig]:
-    """Get only standard technical signals."""
-    return get_technical_signals()
+def _expand_exit_configs(
+    exit_spec: Union[str, List[str]], available_exits: List[str]
+) -> List[str]:
+    """
+    Expand exit configuration specification.
+
+    Args:
+        exit_spec: "all", single name, or list of names
+        configs_dir: Directory for config files
+
+    Returns:
+        List of exit config names
+    """
+    if exit_spec == "all":
+        # Get all available exit configs
+        return [e for e in available_exits if e != "none"]
+    elif isinstance(exit_spec, list):
+        return [e for e in exit_spec if e in available_exits]
+    else:
+        return [exit_spec if exit_spec in available_exits else "none"]
 
 
-def get_advanced_signals_only() -> List[SignalConfig]:
-    """Get only advanced technical signals."""
-    return get_advanced_signals()
+def _format_name(template: str, params: Dict[str, Any], exit_config: str) -> str:
+    """
+    Format a name template with parameter values.
+
+    Args:
+        template: Name template with placeholders like {zscore}
+        params: Parameter dict for substitution
+        exit_config: Exit config name
+
+    Returns:
+        Formatted name string
+    """
+    # Build substitution dict
+    subs = {}
+
+    # Add params
+    for key, value in params.items():
+        # Format numeric values nicely
+        if isinstance(value, float):
+            if value == int(value):
+                subs[key] = str(int(value))
+            else:
+                subs[key] = str(value).replace(".", "_")
+        else:
+            subs[key] = str(value)
+
+    # Add exit
+    subs["exit_config"] = exit_config[:8] if exit_config != "none" else ""
+
+    # Format template
+    try:
+        name = template.format(**subs)
+    except KeyError:
+        # Missing placeholder - just use what we can
+        for key, val in subs.items():
+            template = template.replace(f"{{{key}}}", val)
+        name = template
+
+    # Clean up double underscores and trailing underscores
+    while "__" in name:
+        name = name.replace("__", "_")
+    name = name.strip("_")
+
+    return name
 
 
-def get_combo_signals_only() -> List[SignalConfig]:
-    """Get only combo/confluence signals."""
-    return get_combo_signals()
+def _infer_signal_type(category: str) -> str:
+    """Infer signal type from category name."""
+    if "funding" in category:
+        return "funding"
+    elif "combo" in category:
+        return "combo"
+    elif "advanced" in category:
+        return "technical"  # Default for advanced
+    return "technical"
 
 
 def get_signal_by_name(
-    name: str, configs_dir: str = "./configs"
+    name: str, configs_dir: str = "./configs", signals_file: str = "signals.yaml"
 ) -> Optional[SignalConfig]:
     """Get a specific signal by name."""
-    all_signals = get_signal_configs(configs_dir=configs_dir)
+    all_signals = get_signal_configs(configs_dir=configs_dir, signals_file=signals_file)
     for signal in all_signals:
         if signal.name == name:
             return signal

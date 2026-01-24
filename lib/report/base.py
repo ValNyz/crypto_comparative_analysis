@@ -17,6 +17,11 @@ from .sections.exit_analysis import print_exit_analysis
 from .sections.temporal import print_temporal_analysis
 from .sections.rankings import print_top_by_sharpe
 from .sections.recommendations import print_recommendations
+from .sections.coin import (
+    print_per_coin_summary,
+    print_coin_comparison_matrix,
+    print_consistent_performers,
+)
 from .formatters import print_header
 
 
@@ -53,6 +58,10 @@ class ReportGenerator:
         print_exit_analysis(self.df)
         print_temporal_analysis(self.df, self.config)
         print_top_by_sharpe(self.df, top_n)
+        if "pair" in self.df.columns and self.df["pair"].nunique() > 1:
+            print_per_coin_summary(self.df, top_n=5)
+            print_coin_comparison_matrix(self.df)
+            print_consistent_performers(self.df, min_coins=2)
         print_recommendations(self.df, self.config)
 
         print(f"\n{'=' * 120}")

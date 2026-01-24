@@ -5,9 +5,12 @@
 
 from ..signals.base import SignalConfig
 from ..config.loader import load_signal_conditions
+from ..config import Config
 
 
-def generate_entry_logic(signal: SignalConfig, enable_filter: bool) -> str:
+def generate_entry_logic(
+    signal: SignalConfig, enable_filter: bool, config: Config
+) -> str:
     """
     Generate entry logic code for a signal.
 
@@ -22,7 +25,7 @@ def generate_entry_logic(signal: SignalConfig, enable_filter: bool) -> str:
 
     # Special handling for combo signals
     if signal.signal_type == "combo":
-        return _generate_combo_logic(signal, indent)
+        return _generate_combo_logic(signal, indent, config)
 
     # Get condition for this signal type
     condition = _get_signal_condition(signal)
@@ -202,12 +205,12 @@ def _get_signal_condition(signal: SignalConfig) -> str:
     return logic_map.get((signal.signal_type, signal.direction), "False")
 
 
-def _generate_combo_logic(signal: SignalConfig, indent: str) -> str:
+def _generate_combo_logic(signal: SignalConfig, indent: str, config: Config) -> str:
     """Generate logic for combo/confluence signals."""
     entry_col = "enter_long" if signal.direction == "long" else "enter_short"
 
     # Load signal conditions
-    signal_conditions = load_signal_conditions()
+    signal_conditions = load_signal_conditions(config)
 
     conditions_parts = []
 

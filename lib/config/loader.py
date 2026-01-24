@@ -64,9 +64,9 @@ def load_regime_mappings(configs_dir: str = "./configs") -> Dict[str, List[str]]
     return data.get("regime_filters", _default_regime_mappings())
 
 
-def load_signal_conditions(configs_dir: str = "./configs") -> Dict[str, str]:
+def load_signal_conditions(config: Config) -> Dict[str, str]:
     """Load atomic signal conditions from YAML."""
-    filepath = get_config_path("signal_conditions.yaml", configs_dir)
+    filepath = get_config_path(config.signal_conditions, config.configs_dir)
     if not filepath.exists():
         return _default_signal_conditions()
 

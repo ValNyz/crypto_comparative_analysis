@@ -149,7 +149,9 @@ class StrategyGenerator:
         """Generate a standard technical strategy."""
 
         # Generate entry and exit logic
-        entry_logic = generate_entry_logic(signal, self.config.enable_regime_filter)
+        entry_logic = generate_entry_logic(
+            signal, self.config.enable_regime_filter, self.config
+        )
         exit_logic = generate_exit_logic(exit_cfg, signal.signal_type)
 
         # Determine if trailing stop should be used

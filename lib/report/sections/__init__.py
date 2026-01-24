@@ -13,6 +13,12 @@ from .exit_analysis import print_exit_analysis
 from .temporal import print_temporal_analysis
 from .rankings import print_top_by_sharpe, print_polyvalent_signals
 from .recommendations import print_recommendations
+from .coin import (
+    print_per_coin_summary,
+    print_coin_comparison_matrix,
+    print_consistent_performers,
+    get_per_coin_stats,
+)
 
 __all__ = [
     "print_global_metrics",
@@ -24,4 +30,8 @@ __all__ = [
     "print_top_by_sharpe",
     "print_polyvalent_signals",
     "print_recommendations",
+    "print_per_coin_summary",
+    "print_coin_comparison_matrix",
+    "print_consistent_performers",
+    "get_per_coin_stats",
 ]

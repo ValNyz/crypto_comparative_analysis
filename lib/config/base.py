@@ -18,9 +18,11 @@ class Config:
     data_dir: str = "./data/hyperliquid"
     strategies_dir: str = "./user_data/strategies/generated_v3"
     configs_dir: str = "./configs"
+    signals: str = "signals.yaml"
+    signal_conditions: str = "signal_conditions.yaml"
 
     # Backtest parameters
-    timerange: str = "20250101-20250630"
+    timerange: str = "20250101-20250930"
     min_trades: int = 0
     min_sharpe: float = -2
     min_months: int = 2

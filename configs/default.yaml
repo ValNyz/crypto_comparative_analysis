@@ -10,6 +10,7 @@ config_file: "./user_data/config_analysis.json"
 data_dir: "./data/hyperliquid"
 strategies_dir: "./user_data/strategies/generated_v3"
 configs_dir: "./configs"
+signals: "signals.yaml"
 
 # Backtest parameters
 timerange: "20250101-20250630"

@@ -1,0 +1,14 @@
+funding_signals:
+  # === Base funding signals (ROI/SL only) ===
+  - name: "f_z{zscore}_lb{lookback}_rmin{rsi_min}_rmax{rsi_max}_base"
+    signal_type: funding
+    direction: both
+    params:
+      zscore: [0.75, 1.0, 1.5]
+      lookback: [72, 168]
+      use_rsi: true
+      rsi_min: [25, 30, 35, 40, 45]
+      rsi_max: [75, 70, 65, 60, 55]
+    roi: { "0": 0.02 }
+    stoploss: -0.03
+    exit_config: none

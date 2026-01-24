@@ -26,9 +26,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from lib.config import Config, load_config
 from lib.signals import get_signal_configs
-from lib.backtest import BacktestRunner
+from lib.backtest import BacktestRunner, RollingConfig, run_rolling_backtest
 from lib.data import discover_pairs, expand_pair_patterns
-from lib.report import ReportGenerator
+from lib.report import ReportGenerator, RollingReportGenerator
 
 
 def parse_args():
@@ -39,22 +39,22 @@ def parse_args():
         epilog="""
 Examples:
   # Basic usage
-  python scripts/backtest_v3.py -p BTC/USDC:USDC -t 1h
+  python scripts/comparative_analysis_v3.py -p BTC/USDC:USDC -t 1h
 
   # Multiple pairs with pattern
-  python scripts/backtest_v3.py -p "*/USDC:*" -t 1h 30m
+  python scripts/comparative_analysis_v3.py -p "*/USDC:*" -t 1h 30m
 
   # Filter by signal type
-  python scripts/backtest_v3.py -p BTC/USDC:USDC --filter funding
+  python scripts/comparative_analysis_v3.py -p BTC/USDC:USDC --filter funding
 
   # With regime filtering enabled
-  python scripts/backtest_v3.py -p BTC/USDC:USDC --enable-filter
+  python scripts/comparative_analysis_v3.py -p BTC/USDC:USDC --enable-filter
 
   # Custom config file
-  python scripts/backtest_v3.py --config configs/custom.yaml
+  python scripts/comparative_analysis_v3.py --config configs/custom.yaml
 
   # List available pairs
-  python scripts/backtest_v3.py --list
+  python scripts/comparative_analysis_v3.py --list
         """,
     )
 
@@ -93,14 +93,20 @@ Examples:
         default="./configs",
         help="Directory containing config files",
     )
+    parser.add_argument(
+        "--signals",
+        type=str,
+        default="./configs/signals.yaml",
+        help="YAML file specifying the signal to use.",
+    )
 
     # Execution
     parser.add_argument(
         "--workers",
         "-w",
         type=int,
-        default=6,
-        help="Number of parallel workers (default: 6)",
+        default=4,
+        help="Number of parallel workers (default: 4)",
     )
 
     # Signal filtering
@@ -134,6 +140,20 @@ Examples:
         type=int,
         default=20,
         help="ADX threshold for trending detection (default: 20)",
+    )
+
+    # Rolling backtest
+    parser.add_argument(
+        "--rolling", action="store_true", help="Mode rolling/walk-forward"
+    )
+    parser.add_argument(
+        "--window", type=int, default=3, help="Taille fenêtre en mois (défaut: 3)"
+    )
+    parser.add_argument(
+        "--step", type=int, default=3, help="Décalage en mois (défaut: 1)"
+    )
+    parser.add_argument(
+        "--min-windows", type=int, default=2, help="Min fenêtres pour stats (défaut: 3)"
     )
 
     # Debug/utility
@@ -171,6 +191,7 @@ def main():
     config.regime_lookback = args.regime_lookback
     config.regime_adx_threshold = args.adx_threshold
     config.configs_dir = args.configs_dir
+    config.signals = args.signals
 
     if args.timerange:
         config.timerange = args.timerange
@@ -182,68 +203,133 @@ def main():
             print(f"  {pair}")
         return None
 
-    # Resolve pairs
-    if args.pairs is None:
-        pairs = ["BTC/USDC:USDC"]
-    else:
-        if any("*" in p or "?" in p for p in args.pairs):
-            print("\n🔍 Expansion des patterns...")
-            pairs = expand_pair_patterns(
-                args.pairs, config.data_dir, args.timeframes[0]
-            )
-            if not pairs:
-                print("❌ Aucune paire trouvée pour les patterns spécifiés")
-                return None
-        else:
-            pairs = args.pairs
+    # Résoudre paires
+    pairs = args.pairs or ["BTC/USDC:USDC"]
+    if any("*" in p for p in pairs):
+        print("\n🔍 Expansion des patterns...")
+        pairs = expand_pair_patterns(pairs, config.data_dir, args.timeframes[0])
+        if not pairs:
+            print("❌ Aucune paire trouvée")
+            return
 
-    # Print header
-    filter_status = "🔒 ACTIF" if config.enable_regime_filter else "🔓 INACTIF"
-    print("=" * 120)
-    print(f"🔬 ANALYSE COMPARATIVE V3 - FILTRAGE {filter_status}")
-    print("=" * 120)
-    print(f"""
-   Pairs:           {pairs if len(pairs) <= 5 else f"{len(pairs)} paires"}
-   Timeframes:      {args.timeframes}
-   Période:         {config.timerange}
-   Filtrage régime: {filter_status}
-    """)
-
-    # Load signals
+    # Charger signaux
     signals = get_signal_configs(
         signal_filter=args.filter,
         include_exits=not args.no_exits,
         configs_dir=config.configs_dir,
+        signals_file=config.signals,
     )
 
-    print(f"   Total pairs:      {len(pairs)}")
-    print(f"   Total signaux:    {len(signals)}")
-    print(f"   Total timeframes: {len(args.timeframes)}")
-    print(f"   Total backtests:  {len(pairs) * len(signals) * len(args.timeframes)}")
+    # Header commun
+    _print_header(args, config, pairs, signals)
 
-    # Run backtests
+    # Exécution
+    if args.rolling:
+        consistency_df, raw_df = _run_rolling(config, signals, pairs, args)
+        _save_rolling_results(consistency_df, raw_df, config, args)
+        return consistency_df, raw_df
+    else:
+        df = _run_standard(config, signals, pairs, args)
+        _save_standard_results(df, config, args)
+        return df
+
+
+def _print_header(args, config, pairs, signals):
+    """Affiche le header commun."""
+    mode = "🔄 ROLLING" if args.rolling else "📊 STANDARD"
+    filter_status = "🔒 ACTIF" if config.enable_regime_filter else "🔓 INACTIF"
+
+    print("\n" + "=" * 120)
+    print(f"🔬 ANALYSE COMPARATIVE V3 - {mode}")
+    print("=" * 120)
+    print(f"""
+   Paires:          {pairs if len(pairs) <= 5 else f"{len(pairs)} paires"}
+   Timeframes:      {args.timeframes}
+   Période:         {config.timerange}
+   Signaux:         {len(signals)}
+   Filtrage régime: {filter_status}""")
+
+    if args.rolling:
+        print(f"   Fenêtre:         {args.window} mois")
+        print(f"   Décalage:        {args.step} mois")
+
+
+def _run_standard(config, signals, pairs, args):
+    """Exécute le mode standard."""
+    total = len(pairs) * len(signals) * len(args.timeframes)
+    print(f"   Total backtests: {total}\n")
+
+    # Exécution
     runner = BacktestRunner(config, debug=args.debug)
     df = runner.run_all(signals, pairs, args.timeframes)
 
-    # Generate report
+    # Rapport
     report = ReportGenerator(df, config)
     report.print_full_report()
 
-    # Save results
-    if len(df) > 0:
-        output_dir = config.output_dir
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        suffix = "_filtered" if config.enable_regime_filter else "_unfiltered"
-
-        if args.output:
-            csv_path = Path(args.output)
-        else:
-            csv_path = output_dir / f"v3_{len(pairs)}pairs{suffix}_{ts}.csv"
-
-        df.to_csv(csv_path, index=False)
-        print(f"\n📁 Résultats: {csv_path}")
-
     return df
+
+
+def _run_rolling(config, signals, pairs, args):
+    """Exécute le mode rolling."""
+    rolling_config = RollingConfig(
+        window_months=args.window,
+        step_months=args.step,
+        min_windows=args.min_windows,
+    )
+
+    # Exécution
+    consistency_df, raw_df = run_rolling_backtest(
+        config,
+        signals,
+        pairs,
+        args.timeframes,
+        rolling_config,
+        debug=args.debug,
+    )
+
+    # Rapport via RollingReportGenerator
+    if len(consistency_df) > 0:
+        report = RollingReportGenerator(
+            consistency_df,
+            raw_df,
+            config,
+            window_months=args.window,
+            step_months=args.step,
+        )
+        report.print_full_report()
+
+    return consistency_df, raw_df
+
+
+def _save_standard_results(df, config, args):
+    """Sauvegarde les résultats standard."""
+    if df is None or len(df) == 0:
+        return
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_path = args.output or config.output_dir / f"v3_standard_{ts}.csv"
+    df.to_csv(csv_path, index=False)
+    print(f"\n📁 Résultats: {csv_path}")
+
+
+def _save_rolling_results(consistency_df, raw_df, config, args):
+    """Sauvegarde les résultats rolling."""
+    if consistency_df is None or len(consistency_df) == 0:
+        return
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = (
+        args.output.replace(".csv", "")
+        if args.output
+        else str(config.output_dir / f"rolling_{args.window}m_{args.step}s_{ts}")
+    )
+
+    consistency_df.to_csv(f"{base}_consistency.csv", index=False)
+    raw_df.to_csv(f"{base}_raw.csv", index=False)
+    print("\n📁 Résultats:")
+    print(f"   • {base}_consistency.csv")
+    print(f"   • {base}_raw.csv")
 
 
 if __name__ == "__main__":
