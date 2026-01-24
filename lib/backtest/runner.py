@@ -22,7 +22,6 @@ from .parser import parse_freqtrade_output
 RATE_LIMIT_PATTERNS = [
     r"rate.?limit",
     r"too.?many.?requests",
-    r"429",
     r"throttl",
     r"quota.?exceeded",
     r"request.?limit",
@@ -30,9 +29,6 @@ RATE_LIMIT_PATTERNS = [
     r"temporarily.?unavailable",
     r"try.?again.?later",
     r"overloaded",
-    # Spécifiques Hyperliquid
-    r"hyperliquid.*limit",
-    r"hl.*rate",
 ]
 
 # Compilé pour performance
@@ -141,8 +137,11 @@ class BacktestRunner:
 
                 # Check for rate limit error
                 if is_rate_limit_error(result.stdout, result.stderr):
+                    combined = f"{result.stdout}\n{result.stderr}"
+                    print(RATE_LIMIT_REGEX.search(combined))
                     if attempt < self.max_retries:
                         delay = self._calculate_delay(attempt)
+                        self._debug_output(signal.name, result)
                         self._log_rate_limit(signal.name, attempt, delay)
                         time.sleep(delay)
                         self.retries_total += 1
@@ -355,9 +354,9 @@ class BacktestRunner:
                         break
             else:
                 print("  ⚠ Pas de TOTAL dans stdout")
-                lines = result.stdout.strip().split("\n")[-20:]
+                lines = result.stdout.strip().split("\n")
                 for l in lines:
-                    print(f"    {l[:100]}")
+                    print(f"    {l}")
 
             parsed = parse_freqtrade_output(result.stdout)
             print(

@@ -18,8 +18,9 @@ class Config:
     data_dir: str = "./data/hyperliquid"
     strategies_dir: str = "./user_data/strategies/generated_v3"
     configs_dir: str = "./configs"
-    signals: str = "signals.yaml"
-    signal_conditions: str = "signal_conditions.yaml"
+    signals: str = "./config/signals.yaml"
+    signal_conditions: str = "./config/signal_conditions.yaml"
+    regime_mappings: str = "./configs/regime_mappings.yaml"
 
     # Backtest parameters
     timerange: str = "20250101-20250930"

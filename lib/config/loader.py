@@ -9,11 +9,6 @@ from typing import Dict, Any, Optional, List
 from .base import Config
 
 
-def get_config_path(filename: str, base_dir: str = "./configs") -> Path:
-    """Get full path to a config file."""
-    return Path(base_dir) / filename
-
-
 def load_yaml(filepath: str | Path) -> Dict[str, Any]:
     """Load a YAML file and return its contents."""
     path = Path(filepath)
@@ -53,9 +48,9 @@ def load_config(
     return Config(**filtered)
 
 
-def load_regime_mappings(configs_dir: str = "./configs") -> Dict[str, List[str]]:
+def load_regime_mappings(config: Config) -> Dict[str, List[str]]:
     """Load regime filter mappings from YAML."""
-    filepath = get_config_path("regime_mappings.yaml", configs_dir)
+    filepath = Path(config.regime_mappings)
     if not filepath.exists():
         # Return defaults if file doesn't exist
         return _default_regime_mappings()
@@ -66,7 +61,7 @@ def load_regime_mappings(configs_dir: str = "./configs") -> Dict[str, List[str]]
 
 def load_signal_conditions(config: Config) -> Dict[str, str]:
     """Load atomic signal conditions from YAML."""
-    filepath = get_config_path(config.signal_conditions, config.configs_dir)
+    filepath = Path(config.signal_conditions)
     if not filepath.exists():
         return _default_signal_conditions()
 
