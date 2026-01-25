@@ -13,14 +13,14 @@ from .technical import get_technical_signals
 from .advanced import get_advanced_signals
 from .combo import get_combo_signals
 from ..config.loader import load_yaml
+from ..config.base import Config
 from ..exits.registry import get_exit_names
 
 
 def get_signal_configs(
+    config: Config,
     signal_filter: Optional[str] = None,
     include_exits: bool = True,
-    configs_dir: str = "./configs",
-    signals_file: str = "./configs/signals.yaml",
 ) -> List[SignalConfig]:
     """
     Get all signal configurations.
@@ -36,19 +36,15 @@ def get_signal_configs(
     signals = []
 
     # Try to load from YAML first
-    yaml_path = Path(signals_file)
+    yaml_path = Path(config.signals)
     if yaml_path.exists():
-        yaml_signals = load_signals_from_yaml(
-            str(yaml_path), signal_filter, configs_dir
-        )
+        yaml_signals = load_signals_from_yaml(config, str(yaml_path), signal_filter)
         if yaml_signals:
             return yaml_signals
 
     # Fall back to programmatic generation
     if signal_filter is None or signal_filter == "funding":
-        signals.extend(
-            get_funding_signals(include_exits=include_exits, configs_dir=configs_dir)
-        )
+        signals.extend(get_funding_signals(include_exits=include_exits, config=config))
 
     if signal_filter is None or signal_filter == "technical":
         signals.extend(get_technical_signals())
@@ -63,7 +59,9 @@ def get_signal_configs(
 
 
 def load_signals_from_yaml(
-    filepath: str, signal_filter: Optional[str] = None, configs_dir: str = "./configs"
+    config: Config,
+    filepath: str,
+    signal_filter: Optional[str] = None,
 ) -> List[SignalConfig]:
     """
     Load signal configurations from YAML file with advanced expansion.
@@ -93,7 +91,7 @@ def load_signals_from_yaml(
     }
 
     # Get available exit configs for "all" expansion
-    available_exits = get_exit_names(configs_dir)
+    available_exits = get_exit_names(config)
 
     for category, signal_type_override in category_map.items():
         if category not in data:

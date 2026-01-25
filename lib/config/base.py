@@ -19,6 +19,7 @@ class Config:
     strategies_dir: str = "./user_data/strategies/generated_v3"
     configs_dir: str = "./configs"
     signals: str = "./config/signals.yaml"
+    exits: str = "./configs/exits.yaml"
     signal_conditions: str = "./config/signal_conditions.yaml"
     regime_mappings: str = "./configs/regime_mappings.yaml"
 

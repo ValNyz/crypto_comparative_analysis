@@ -4,6 +4,6 @@
 """Configuration module."""
 
 from .base import Config
-from .loader import load_config, load_yaml, get_config_path
+from .loader import load_config, load_yaml
 
-__all__ = ["Config", "load_config", "load_yaml", "get_config_path"]
+__all__ = ["Config", "load_config", "load_yaml"]

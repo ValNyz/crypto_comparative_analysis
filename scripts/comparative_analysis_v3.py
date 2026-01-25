@@ -214,10 +214,9 @@ def main():
 
     # Charger signaux
     signals = get_signal_configs(
+        config=config,
         signal_filter=args.filter,
         include_exits=not args.no_exits,
-        configs_dir=config.configs_dir,
-        signals_file=config.signals,
     )
 
     # Header commun

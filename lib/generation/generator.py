@@ -52,7 +52,7 @@ class StrategyGenerator:
         class_name = f"S_{sanitize_class_name(signal.name)}_{actual_tf}"
 
         # Get exit config
-        exit_cfg = get_exit_config(signal.exit_config, self.config.configs_dir)
+        exit_cfg = get_exit_config(signal.exit_config, self.config)
 
         # Generate code based on signal type
         if signal.signal_type == "funding":

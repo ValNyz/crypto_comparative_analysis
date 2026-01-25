@@ -5,13 +5,14 @@
 
 from typing import List, Optional
 from .base import SignalConfig
+from ..config.base import Config
 from ..exits.registry import get_exit_names
 
 
 def get_funding_signals(
+    config: Config,
     include_exits: bool = True,
     exit_configs: Optional[List[str]] = None,
-    configs_dir: str = "./configs",
 ) -> List[SignalConfig]:
     """
     Generate funding contrarian signal configurations.
@@ -28,7 +29,7 @@ def get_funding_signals(
 
     # Get available exit configs
     if exit_configs is None and include_exits:
-        exit_configs = get_exit_names(configs_dir)
+        exit_configs = get_exit_names(config)
 
     # Parameter combinations to test
     zscore_thresholds = [0.75, 1.0, 1.5]

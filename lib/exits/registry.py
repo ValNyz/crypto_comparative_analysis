@@ -6,7 +6,8 @@
 from pathlib import Path
 from typing import Dict, Optional, List
 from .base import ExitConfig
-from ..config.loader import load_yaml, get_config_path
+from ..config.loader import load_yaml
+from ..config.base import Config
 
 
 # Cache for loaded exits
@@ -43,7 +44,7 @@ def load_exits_from_yaml(
     return exits
 
 
-def get_exit_config(name: str, configs_dir: str = "./configs") -> ExitConfig:
+def get_exit_config(name: str, config: Config) -> ExitConfig:
     """
     Get a specific exit configuration by name.
 
@@ -57,7 +58,7 @@ def get_exit_config(name: str, configs_dir: str = "./configs") -> ExitConfig:
     global _exits_cache
 
     if _exits_cache is None:
-        filepath = get_config_path("exits.yaml", configs_dir)
+        filepath = Path(config.exits)
         _exits_cache = load_exits_from_yaml(str(filepath))
 
     if name not in _exits_cache:
@@ -71,12 +72,12 @@ def get_exit_config(name: str, configs_dir: str = "./configs") -> ExitConfig:
     return _exits_cache[name]
 
 
-def get_all_exit_configs(configs_dir: str = "./configs") -> Dict[str, ExitConfig]:
+def get_all_exit_configs(config: Config) -> Dict[str, ExitConfig]:
     """Get all available exit configurations."""
     global _exits_cache
 
     if _exits_cache is None:
-        filepath = get_config_path("exits.yaml", configs_dir)
+        filepath = Path(config.exits)
         if Path(filepath).exists():
             _exits_cache = load_exits_from_yaml(str(filepath))
         else:
@@ -85,9 +86,9 @@ def get_all_exit_configs(configs_dir: str = "./configs") -> Dict[str, ExitConfig
     return _exits_cache
 
 
-def get_exit_names(configs_dir: str = "./configs") -> List[str]:
+def get_exit_names(config: Config) -> List[str]:
     """Get list of all available exit config names."""
-    return list(get_all_exit_configs(configs_dir).keys())
+    return list(get_all_exit_configs(config).keys())
 
 
 def clear_cache():
