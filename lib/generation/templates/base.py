@@ -42,6 +42,40 @@ INDICATORS_BLOCK = """
         dataframe['mfi'] = talib.MFI(dataframe['high'], dataframe['low'], dataframe['close'], dataframe['volume'], timeperiod=14)
 """
 
+REGIME_DETECTION_BLOCK_V4EMA = '''
+    def _detect_regime_v3(self, dataframe: DataFrame) -> DataFrame:
+        """EMA-alignment regime classifier (v4ema).
+
+        bull  = close > ema_50 > ema_200 AND atr_percentile < 0.7
+        bear  = close < ema_50 < ema_200 AND atr_percentile < 0.7
+        volatile = atr_percentile >= 0.7
+        range = else
+        """
+        lb = self.REGIME_LOOKBACK
+
+        if 'ema_200' not in dataframe.columns:
+            dataframe['ema_200'] = talib.EMA(dataframe['close'], timeperiod=200)
+
+        atr_norm = dataframe['atr'] / dataframe['close']
+        dataframe['atr_percentile'] = atr_norm.rolling(lb).apply(
+            lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False
+        )
+
+        bull_aligned = (dataframe['close'] > dataframe['ema_50']) & (dataframe['ema_50'] > dataframe['ema_200'])
+        bear_aligned = (dataframe['close'] < dataframe['ema_50']) & (dataframe['ema_50'] < dataframe['ema_200'])
+
+        conditions = [
+            bull_aligned & (dataframe['atr_percentile'] < 0.7),
+            bear_aligned & (dataframe['atr_percentile'] < 0.7),
+            dataframe['atr_percentile'] >= 0.7,
+        ]
+        dataframe['regime'] = np.select(
+            conditions, ['bull', 'bear', 'volatile'], default='range'
+        )
+        dataframe['regime_confidence'] = 0.5
+        return dataframe
+'''
+
 REGIME_DETECTION_BLOCK = '''
     def _detect_regime_v3(self, dataframe: DataFrame) -> DataFrame:
         """

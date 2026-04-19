@@ -8,10 +8,6 @@ from copy import deepcopy
 from typing import List, Optional, Dict, Union, Any
 from pathlib import Path
 from .base import SignalConfig
-from .funding import get_funding_signals
-from .technical import get_technical_signals
-from .advanced import get_advanced_signals
-from .combo import get_combo_signals
 from ..config.loader import load_yaml
 from ..config.base import Config
 from ..exits.registry import get_exit_names
@@ -33,29 +29,13 @@ def get_signal_configs(
     Returns:
         List of SignalConfig instances
     """
-    signals = []
-
-    # Try to load from YAML first
     yaml_path = Path(config.signals)
     if yaml_path.exists():
         yaml_signals = load_signals_from_yaml(config, str(yaml_path), signal_filter)
         if yaml_signals:
             return yaml_signals
 
-    # Fall back to programmatic generation
-    if signal_filter is None or signal_filter == "funding":
-        signals.extend(get_funding_signals(include_exits=include_exits, config=config))
-
-    if signal_filter is None or signal_filter == "technical":
-        signals.extend(get_technical_signals())
-
-    if signal_filter is None or signal_filter == "advanced":
-        signals.extend(get_advanced_signals())
-
-    if signal_filter is None or signal_filter == "combo":
-        signals.extend(get_combo_signals())
-
-    return signals
+    return []
 
 
 def load_signals_from_yaml(
@@ -158,6 +138,7 @@ def expand_signal_template(
     timeframe_override = template.get("timeframe_override")
     allowed_regimes = template.get("allowed_regimes")
     exit_config = template.get("exit_config", "none")
+    regime_classifier = template.get("regime_classifier", "v3")
 
     # Separate expandable params (lists) from fixed params
     expand_params = {}
@@ -224,6 +205,7 @@ def expand_signal_template(
                 timeframe_override=timeframe_override,
                 allowed_regimes=allowed_regimes,
                 exit_config=exit_config,
+                regime_classifier=regime_classifier,
             )
             signals.append(signal)
     else:
@@ -240,6 +222,7 @@ def expand_signal_template(
             timeframe_override=timeframe_override,
             allowed_regimes=allowed_regimes,
             exit_config=exit_list[0],
+            regime_classifier=regime_classifier,
         )
         signals.append(signal)
 
@@ -332,39 +315,10 @@ def _infer_signal_type(category: str) -> str:
     return "technical"
 
 
-def get_signal_by_name(
-    name: str, configs_dir: str = "./configs", signals_file: str = "signals.yaml"
-) -> Optional[SignalConfig]:
+def get_signal_by_name(name: str, config: Config) -> Optional[SignalConfig]:
     """Get a specific signal by name."""
-    all_signals = get_signal_configs(configs_dir=configs_dir, signals_file=signals_file)
+    all_signals = get_signal_configs(config)
     for signal in all_signals:
         if signal.name == name:
             return signal
     return None
-
-
-def get_signal_types() -> List[str]:
-    """Get list of all available signal types."""
-    return [
-        "funding",
-        "rsi",
-        "bollinger",
-        "ema_cross",
-        "stochastic",
-        "macd",
-        "reversal",
-        "zscore",
-        "multi",
-        "williams_r",
-        "cci",
-        "roc",
-        "divergence",
-        "squeeze",
-        "keltner",
-        "donchian",
-        "vwap",
-        "volume_spike",
-        "oi_divergence",
-        "liquidation",
-        "combo",
-    ]

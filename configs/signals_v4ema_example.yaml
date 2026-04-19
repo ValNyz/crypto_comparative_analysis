@@ -1,0 +1,26 @@
+# =============================================================================
+# Example: opt-in V4EMA regime classifier for funding-contrarian signals.
+#
+# Any signal block may carry `regime_classifier: v4ema` at its top level to
+# switch that block's generated strategies to the EMA-alignment classifier
+# (close > EMA50 > EMA200 → bull, mirror for bear).
+#
+# When the key is omitted, the default "v3" (ADX/ATR) classifier is used
+# exactly as before. Existing YAMLs need no changes.
+# =============================================================================
+
+funding_signals:
+  - name: "f_z{zscore}_lb{lookback}_r35_v4ema"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params:
+      zscore: [1.0, 1.5, 2.0]
+      lookback: [336, 504, 720]
+      use_rsi: true
+      rsi_min: 35
+      rsi_max: 65
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.02 }
+    stoploss: -0.03
+    exit_config: none

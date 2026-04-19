@@ -69,6 +69,9 @@ class SignalConfig:
     # Exit configuration name
     exit_config: str = "none"
 
+    # Regime detection implementation: "v3" (ADX/ATR — default) or "v4ema" (EMA alignment)
+    regime_classifier: str = "v3"
+
     def __post_init__(self):
         """Auto-detect allowed regimes if not specified."""
         if self.allowed_regimes is None:
@@ -96,6 +99,7 @@ class SignalConfig:
             timeframe_override=data.get("timeframe_override"),
             allowed_regimes=data.get("allowed_regimes"),
             exit_config=data.get("exit_config", "none"),
+            regime_classifier=data.get("regime_classifier", "v3"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -110,6 +114,7 @@ class SignalConfig:
             "timeframe_override": self.timeframe_override,
             "allowed_regimes": self.allowed_regimes,
             "exit_config": self.exit_config,
+            "regime_classifier": self.regime_classifier,
         }
 
     def get_param(self, key: str, default: Any = None) -> Any:
@@ -128,4 +133,5 @@ class SignalConfig:
             timeframe_override=self.timeframe_override,
             allowed_regimes=self.allowed_regimes,
             exit_config=exit_name,
+            regime_classifier=self.regime_classifier,
         )

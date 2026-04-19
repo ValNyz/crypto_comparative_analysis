@@ -13,11 +13,30 @@ from ..exits.registry import get_exit_config
 from ..config.base import Config
 from ..utils.helpers import sanitize_class_name
 
-from .templates.base import INDICATORS_BLOCK, REGIME_DETECTION_BLOCK
+from .templates.base import (
+    INDICATORS_BLOCK,
+    REGIME_DETECTION_BLOCK,
+    REGIME_DETECTION_BLOCK_V4EMA,
+)
 from .templates.standard import STRATEGY_TEMPLATE_STANDARD
 from .templates.funding import STRATEGY_TEMPLATE_FUNDING
 from .entry_logic import generate_entry_logic
 from .exit_logic import generate_exit_logic
+
+
+_REGIME_BLOCKS = {
+    "v3": REGIME_DETECTION_BLOCK,
+    "v4ema": REGIME_DETECTION_BLOCK_V4EMA,
+}
+
+
+def _regime_block_for(classifier: str) -> str:
+    """Return the regime-detection code block matching a classifier name.
+
+    Unknown names fall back to 'v3' (ADX/ATR) so the generator stays
+    strictly backward-compatible.
+    """
+    return _REGIME_BLOCKS.get(classifier, REGIME_DETECTION_BLOCK)
 
 
 class StrategyGenerator:
@@ -134,7 +153,7 @@ class StrategyGenerator:
             # Data directory
             data_dir=self.config.data_dir,
             # Regime detection block
-            regime_detection_block=REGIME_DETECTION_BLOCK,
+            regime_detection_block=_regime_block_for(signal.regime_classifier),
             # Exit logic
             exit_logic=exit_logic,
         )
@@ -175,7 +194,7 @@ class StrategyGenerator:
             # Indicators block
             indicators_block=INDICATORS_BLOCK,
             # Regime detection block
-            regime_detection_block=REGIME_DETECTION_BLOCK,
+            regime_detection_block=_regime_block_for(signal.regime_classifier),
             # Entry and exit logic
             entry_logic=entry_logic,
             exit_logic=exit_logic,
