@@ -3,7 +3,7 @@
 # =============================================================================
 """Exit configuration dataclass."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Any
 
 
@@ -68,6 +68,48 @@ class ExitConfig:
     use_crypto_trail: bool = False
     crypto_trail_mult: float = 2.0
     crypto_trail_period: int = 14
+
+    # =========================================================================
+    # DYNAMIC ROI (custom_exit-based, orthogonal to signal exits above)
+    # =========================================================================
+    # Each dynamic-ROI method replaces freqtrade's static minimal_roi with a
+    # per-trade target computed at exit-check time. Set only one per ExitConfig.
+    # Empty defaults preserve backwards compatibility.
+
+    # Design 1: Regime-indexed ROI. Keys are "<direction>_<regime>"
+    # e.g. "long_volatile". Uses fallback when key not found.
+    use_regime_roi: bool = False
+    regime_roi_map: Dict[str, float] = field(default_factory=dict)
+    regime_roi_fallback: float = 0.02
+
+    # Design 2: ATR-scaled ROI. target = clip(k * atr_pct_at_entry, floor, cap).
+    # ATR% is carried in entry tag as suffix `_atr<pct:.4f>`.
+    use_atr_roi: bool = False
+    atr_roi_k: float = 1.5          # multiplier
+    atr_roi_floor: float = 0.008    # min 0.8%
+    atr_roi_cap: float = 0.04       # max 4%
+
+    # Design 3: |Z|-scaled ROI. target = clip(base + slope*(|z|-1.0), base, cap).
+    # |z| is carried in entry tag as suffix `_z<|z|:.2f>`.
+    use_zscore_roi: bool = False
+    zscore_roi_base: float = 0.01
+    zscore_roi_slope: float = 0.005
+    zscore_roi_cap: float = 0.03
+
+    # Design 4: Trailing ROI. Arms once profit >= trail_activate_pct;
+    # exits when profit drops below (peak - trail_distance_pct).
+    # Uses freqtrade's trade.max_rate / trade.min_rate to reconstruct peak.
+    use_trailing_roi: bool = False
+    trail_activate_pct: float = 0.005
+    trail_distance_pct: float = 0.005
+
+    # Design 5: Partial exit. At trigger_pct, exit `partial_frac` of position.
+    # Remaining position continues until stoploss/signal-exit. Requires
+    # freqtrade `position_adjustment_enable: True` (emitted by generator when
+    # this flag is on).
+    use_partial_exit: bool = False
+    partial_trigger_pct: float = 0.010   # trigger at +1%
+    partial_frac: float = 0.5            # exit 50% of stake
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExitConfig":
