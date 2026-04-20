@@ -198,3 +198,103 @@ def generate_exit_logic(exit_config: ExitConfig, signal_type: str) -> str:
             lines.append(f"{indent}dataframe.loc[mask_es, 'exit_tag'] = '{tag}'")
 
     return "\n".join(lines)
+
+
+def generate_custom_exit_method(exit_config: ExitConfig) -> str:
+    """
+    Emit a `custom_exit()` method body for regime_roi, atr_roi, zscore_roi,
+    or trailing_roi. Returns "" when none of those flags is set.
+
+    Priority if multiple flags set: regime > atr > zscore > trailing.
+    YAML should set only one.
+    """
+    flags = (
+        exit_config.use_regime_roi,
+        exit_config.use_atr_roi,
+        exit_config.use_zscore_roi,
+        exit_config.use_trailing_roi,
+    )
+    if not any(flags):
+        return ""
+
+    ind = "    "
+    lines = [
+        f"{ind}def custom_exit(self, pair, trade, current_time, current_rate, current_profit, **kwargs):",
+    ]
+
+    if exit_config.use_regime_roi:
+        items = ", ".join(
+            f"{k!r}: {v!r}" for k, v in sorted(exit_config.regime_roi_map.items())
+        )
+        lines += [
+            f"{ind}{ind}roi_map = {{{items}}}",
+            f"{ind}{ind}fallback = {exit_config.regime_roi_fallback}",
+            f"{ind}{ind}tag = trade.enter_tag or ''",
+            f"{ind}{ind}parts = tag.split('_')",
+            f"{ind}{ind}if len(parts) < 3:",
+            f"{ind}{ind}{ind}return None",
+            f"{ind}{ind}direction, regime = parts[1], parts[2]",
+            f"{ind}{ind}target = roi_map.get(f'{{direction}}_{{regime}}', fallback)",
+            f"{ind}{ind}if current_profit >= target:",
+            f"{ind}{ind}{ind}return f'roi_{{direction}}_{{regime}}_{{int(target*10000)}}bps'",
+            f"{ind}{ind}return None",
+        ]
+    elif exit_config.use_atr_roi:
+        k = exit_config.atr_roi_k
+        floor = exit_config.atr_roi_floor
+        cap = exit_config.atr_roi_cap
+        lines += [
+            f"{ind}{ind}k, floor, cap = {k}, {floor}, {cap}",
+            f"{ind}{ind}tag = trade.enter_tag or ''",
+            f"{ind}{ind}atr_pct = 0.01",
+            f"{ind}{ind}for tok in tag.split('_'):",
+            f"{ind}{ind}{ind}if tok.startswith('atr'):",
+            f"{ind}{ind}{ind}{ind}try:",
+            f"{ind}{ind}{ind}{ind}{ind}atr_pct = float(tok[3:])",
+            f"{ind}{ind}{ind}{ind}except ValueError:",
+            f"{ind}{ind}{ind}{ind}{ind}pass",
+            f"{ind}{ind}{ind}{ind}break",
+            f"{ind}{ind}target = max(floor, min(cap, k * atr_pct))",
+            f"{ind}{ind}if current_profit >= target:",
+            f"{ind}{ind}{ind}return f'roi_atr{{atr_pct:.4f}}_{{int(target*10000)}}bps'",
+            f"{ind}{ind}return None",
+        ]
+    elif exit_config.use_zscore_roi:
+        base = exit_config.zscore_roi_base
+        slope = exit_config.zscore_roi_slope
+        cap = exit_config.zscore_roi_cap
+        lines += [
+            f"{ind}{ind}base, slope, cap = {base}, {slope}, {cap}",
+            f"{ind}{ind}tag = trade.enter_tag or ''",
+            f"{ind}{ind}abs_z = 1.0",
+            f"{ind}{ind}for tok in tag.split('_'):",
+            f"{ind}{ind}{ind}if tok.startswith('z') and not tok.startswith('zs'):",
+            f"{ind}{ind}{ind}{ind}try:",
+            f"{ind}{ind}{ind}{ind}{ind}abs_z = float(tok[1:])",
+            f"{ind}{ind}{ind}{ind}except ValueError:",
+            f"{ind}{ind}{ind}{ind}{ind}pass",
+            f"{ind}{ind}{ind}{ind}break",
+            f"{ind}{ind}target = max(base, min(cap, base + slope * (abs_z - 1.0)))",
+            f"{ind}{ind}if current_profit >= target:",
+            f"{ind}{ind}{ind}return f'roi_zs{{abs_z:.1f}}_{{int(target*10000)}}bps'",
+            f"{ind}{ind}return None",
+        ]
+    elif exit_config.use_trailing_roi:
+        activate = exit_config.trail_activate_pct
+        distance = exit_config.trail_distance_pct
+        lines += [
+            f"{ind}{ind}activate, distance = {activate}, {distance}",
+            f"{ind}{ind}if trade.is_short:",
+            f"{ind}{ind}{ind}peak_rate = trade.min_rate if trade.min_rate else current_rate",
+            f"{ind}{ind}{ind}peak_profit = (trade.open_rate - peak_rate) / trade.open_rate - 0.001",
+            f"{ind}{ind}else:",
+            f"{ind}{ind}{ind}peak_rate = trade.max_rate if trade.max_rate else current_rate",
+            f"{ind}{ind}{ind}peak_profit = (peak_rate - trade.open_rate) / trade.open_rate - 0.001",
+            f"{ind}{ind}if peak_profit < activate:",
+            f"{ind}{ind}{ind}return None",
+            f"{ind}{ind}if current_profit < peak_profit - distance:",
+            f"{ind}{ind}{ind}return f'trail_peak{{int(peak_profit*10000)}}_out{{int(current_profit*10000)}}'",
+            f"{ind}{ind}return None",
+        ]
+
+    return "\n".join(lines)
