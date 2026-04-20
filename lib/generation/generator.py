@@ -20,8 +20,24 @@ from .templates.base import (
 )
 from .templates.standard import STRATEGY_TEMPLATE_STANDARD
 from .templates.funding import STRATEGY_TEMPLATE_FUNDING
+
+
+def _funding_direction_loop(direction: str) -> str:
+    long_entry = '("long", zscore <= -threshold, "enter_long")'
+    short_entry = '("short", zscore >= threshold, "enter_short")'
+    if direction == "long":
+        entries = [long_entry]
+    elif direction == "short":
+        entries = [short_entry]
+    else:
+        entries = [long_entry, short_entry]
+    return "[" + ", ".join(entries) + "]"
 from .entry_logic import generate_entry_logic
-from .exit_logic import generate_exit_logic
+from .exit_logic import (
+    generate_exit_logic,
+    generate_custom_exit_method,
+    generate_partial_exit_method,
+)
 
 
 _REGIME_BLOCKS = {
@@ -154,8 +170,13 @@ class StrategyGenerator:
             data_dir=self.config.data_dir,
             # Regime detection block
             regime_detection_block=_regime_block_for(signal.regime_classifier),
+            # Entry-direction loop (respects signal.direction)
+            direction_loop=_funding_direction_loop(signal.direction),
             # Exit logic
             exit_logic=exit_logic,
+            # Dynamic-ROI methods (empty strings when disabled → no code emitted)
+            custom_exit_method=generate_custom_exit_method(exit_cfg),
+            partial_exit_method=generate_partial_exit_method(exit_cfg),
         )
 
     def _generate_standard_strategy(
