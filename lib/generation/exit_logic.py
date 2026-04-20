@@ -298,3 +298,38 @@ def generate_custom_exit_method(exit_config: ExitConfig) -> str:
         ]
 
     return "\n".join(lines)
+
+
+def generate_partial_exit_method(exit_config: ExitConfig) -> str:
+    """
+    Emit an `adjust_trade_position()` method that exits a fraction of the
+    position at a target profit, leaving the rest to run until signal/SL.
+    Returns "" when use_partial_exit is False.
+
+    Also emits `position_adjustment_enable = True` as a class attribute so
+    freqtrade wires up the adjustment path.
+    """
+    if not exit_config.use_partial_exit:
+        return ""
+
+    ind = "    "
+    trigger = exit_config.partial_trigger_pct
+    frac = exit_config.partial_frac
+    lines = [
+        f"{ind}position_adjustment_enable = True",
+        "",
+        f"{ind}def adjust_trade_position(self, trade, current_time, current_rate, current_profit, min_stake, max_stake, current_entry_rate, current_exit_rate, current_entry_profit, current_exit_profit, **kwargs):",
+        f"{ind}{ind}# Exit {int(frac*100)}% at +{trigger*100:.1f}% profit (once).",
+        f"{ind}{ind}if current_profit < {trigger}:",
+        f"{ind}{ind}{ind}return None",
+        f"{ind}{ind}if getattr(trade, '_partial_done', False):",
+        f"{ind}{ind}{ind}return None",
+        f"{ind}{ind}filled_stake = trade.stake_amount",
+        f"{ind}{ind}exit_stake = -filled_stake * {frac}",
+        f"{ind}{ind}try:",
+        f"{ind}{ind}{ind}trade._partial_done = True  # type: ignore",
+        f"{ind}{ind}except Exception:",
+        f"{ind}{ind}{ind}pass",
+        f"{ind}{ind}return exit_stake, f'partial_{{int({trigger}*10000)}}bps'",
+    ]
+    return "\n".join(lines)
