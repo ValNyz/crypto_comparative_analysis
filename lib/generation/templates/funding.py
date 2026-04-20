@@ -241,6 +241,10 @@ class {class_name}(IStrategy):
 {exit_logic}
         return dataframe
 
+{custom_exit_method}
+
+{partial_exit_method}
+
     def leverage(self, pair, current_time, current_rate, proposed_leverage, max_leverage, entry_tag, side, **kwargs):
         return 1.0
 '''
