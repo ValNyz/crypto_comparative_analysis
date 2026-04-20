@@ -1,0 +1,62 @@
+# HYPE dynamic-ROI vs. current winner (stoch_exit + flat ROI 1.5%).
+# Same entry: z=1.0 lb=336 V4EMA. Used for monthly rolling 1m-detail run.
+funding_signals:
+  - name: "cmp_stoch_flat15"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.015 }
+    stoploss: -0.03
+    exit_config: stoch_exit
+
+  - name: "cmp_regime"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.05 }
+    stoploss: -0.03
+    exit_config: regime_roi_hype
+
+  - name: "cmp_atr"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.05 }
+    stoploss: -0.03
+    exit_config: atr_roi_k15
+
+  - name: "cmp_zscore"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.05 }
+    stoploss: -0.03
+    exit_config: zscore_roi_default
+
+  - name: "cmp_trailing"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.05 }
+    stoploss: -0.03
+    exit_config: trailing_roi_05
+
+  - name: "cmp_partial"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.015 }
+    stoploss: -0.03
+    exit_config: partial_exit_50_at1
