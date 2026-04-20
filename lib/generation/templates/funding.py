@@ -216,7 +216,7 @@ class {class_name}(IStrategy):
         volume_ok = dataframe["volume"] > 0
         regime_ok = regime.isin(self.ALLOWED_REGIMES) if self.ENABLE_FILTER else True
 
-        for direction, cond, col in [("long", zscore <= -threshold, "enter_long"), ("short", zscore >= threshold, "enter_short")]:
+        for direction, cond, col in {direction_loop}:
             full_cond = cond & rsi_ok & volumef_ok & atr_ok & volume_ok & regime_ok
             if direction == "long":
                 full_cond = full_cond & trend_ok_long & ema_ok_long & bb_ok_long & stoch_ok_long & stoch_cross_long & macd_ok_long & candle_ok_long & engulf_ok_long
@@ -226,7 +226,15 @@ class {class_name}(IStrategy):
             for reg in ['bull', 'bear', 'range', 'volatile']:
                 mask = full_cond & (regime == reg)
                 dataframe.loc[mask, col] = 1
-                dataframe.loc[mask, "enter_tag"] = f"funding_{{direction}}_{{reg}}"
+                # Capture |z| and atr% at entry time for dynamic-ROI policies.
+                # Use median across entries in this bar to get one scalar per tag.
+                _zabs = float(abs(zscore.loc[mask].median())) if mask.any() else 0.0
+                _atrp = float(
+                    (dataframe.loc[mask, "atr"] / dataframe.loc[mask, "close"]).median()
+                ) if mask.any() else 0.0
+                dataframe.loc[mask, "enter_tag"] = (
+                    f"funding_{{direction}}_{{reg}}_z{{_zabs:.2f}}_atr{{_atrp:.4f}}"
+                )
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
