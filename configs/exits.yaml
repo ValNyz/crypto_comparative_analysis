@@ -240,3 +240,73 @@ exits:
     vol_expansion_mult: 1.5
     use_crypto_trail: true
     crypto_trail_mult: 1.5
+
+  # =========================================================================
+  # DYNAMIC ROI PRESETS (custom_exit / adjust_trade_position based)
+  # =========================================================================
+
+  # Design 1 — HYPE-tuned regime-indexed ROI
+  regime_roi_hype:
+    use_regime_roi: true
+    regime_roi_map:
+      long_volatile: 0.025
+      long_bull: 0.025
+      long_range: 0.015
+      long_bear: 0.015
+      short_bear: 0.025
+      short_volatile: 0.025
+      short_bull: 0.010
+      short_range: 0.015
+    regime_roi_fallback: 0.015
+
+  # Design 2 — ATR-scaled ROI (k=1.5)
+  atr_roi_k15:
+    use_atr_roi: true
+    atr_roi_k: 1.5
+    atr_roi_floor: 0.008
+    atr_roi_cap: 0.04
+
+  # Design 2 — Aggressive ATR scaling (k=2.0)
+  atr_roi_k20:
+    use_atr_roi: true
+    atr_roi_k: 2.0
+    atr_roi_floor: 0.010
+    atr_roi_cap: 0.05
+
+  # Design 3 — |Z|-scaled default
+  zscore_roi_default:
+    use_zscore_roi: true
+    zscore_roi_base: 0.01
+    zscore_roi_slope: 0.005
+    zscore_roi_cap: 0.03
+
+  # Design 3 — Steeper |Z| slope
+  zscore_roi_steep:
+    use_zscore_roi: true
+    zscore_roi_base: 0.01
+    zscore_roi_slope: 0.010
+    zscore_roi_cap: 0.04
+
+  # Design 4 — Trailing activated at +0.5%, 0.5% giveback
+  trailing_roi_05:
+    use_trailing_roi: true
+    trail_activate_pct: 0.005
+    trail_distance_pct: 0.005
+
+  # Design 4 — Wider trailing (lets winners run more)
+  trailing_roi_1:
+    use_trailing_roi: true
+    trail_activate_pct: 0.010
+    trail_distance_pct: 0.008
+
+  # Design 5 — Partial exit: take 50% at +1%
+  partial_exit_50_at1:
+    use_partial_exit: true
+    partial_trigger_pct: 0.010
+    partial_frac: 0.5
+
+  # Design 5 — Take 33% at +0.75%
+  partial_exit_33_at075:
+    use_partial_exit: true
+    partial_trigger_pct: 0.0075
+    partial_frac: 0.333
