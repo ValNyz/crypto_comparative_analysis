@@ -1,0 +1,52 @@
+# Smoke test: one entry signal, all 5 new dynamic-ROI designs.
+# High static ROI (5%) so that dynamic ROI drives exits.
+funding_signals:
+  - name: "drsmk_regime"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.05 }
+    stoploss: -0.03
+    exit_config: regime_roi_hype
+
+  - name: "drsmk_atr"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.05 }
+    stoploss: -0.03
+    exit_config: atr_roi_k15
+
+  - name: "drsmk_zscore"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.05 }
+    stoploss: -0.03
+    exit_config: zscore_roi_default
+
+  - name: "drsmk_trailing"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.05 }
+    stoploss: -0.03
+    exit_config: trailing_roi_05
+
+  - name: "drsmk_partial"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.05 }
+    stoploss: -0.03
+    exit_config: partial_exit_50_at1
