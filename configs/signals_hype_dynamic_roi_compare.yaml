@@ -60,3 +60,23 @@ funding_signals:
     roi: { "0": 0.015 }
     stoploss: -0.03
     exit_config: partial_exit_50_at1
+
+  - name: "cmp_partial_stoch"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.015 }
+    stoploss: -0.03
+    exit_config: partial_stoch_combo
+
+  - name: "cmp_partial33_stoch"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.015 }
+    stoploss: -0.03
+    exit_config: partial33_stoch_combo

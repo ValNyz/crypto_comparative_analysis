@@ -310,3 +310,23 @@ exits:
     use_partial_exit: true
     partial_trigger_pct: 0.0075
     partial_frac: 0.333
+
+  # Design 7 — Combo: partial exit 50% at +1% AND stoch_exit on remainder.
+  # Partial fires first (via adjust_trade_position), stoch catches reversal
+  # on the remaining half (via exit_long/exit_short signals).
+  partial_stoch_combo:
+    use_stoch_exit: true
+    stoch_exit_long: 80
+    stoch_exit_short: 20
+    use_partial_exit: true
+    partial_trigger_pct: 0.010
+    partial_frac: 0.5
+
+  # Design 7 variant — partial 33% at +0.75% + stoch (more cautious partial)
+  partial33_stoch_combo:
+    use_stoch_exit: true
+    stoch_exit_long: 80
+    stoch_exit_short: 20
+    use_partial_exit: true
+    partial_trigger_pct: 0.0075
+    partial_frac: 0.333
