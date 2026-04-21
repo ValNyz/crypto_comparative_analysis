@@ -1,0 +1,75 @@
+# HYPE multi-lookback z-score combining.
+# Baseline (single lookback=336) vs 3 combine methods × 2 z-thresholds.
+# Entry = z=1.0 or z=1.5 contrarian, lookback primary 336h, extras [168, 720].
+# Exit = flat ROI 1.5% + stoch_exit (current live config).
+
+funding_signals:
+  - name: "mlb_base_lb336_z1"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.015 }
+    stoploss: -0.03
+    exit_config: stoch_exit
+
+  - name: "mlb_all_z1"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    multi_lookback: [168, 720]
+    lookback_combine: all
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.015 }
+    stoploss: -0.03
+    exit_config: stoch_exit
+
+  - name: "mlb_mean_z1"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    multi_lookback: [168, 720]
+    lookback_combine: mean
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.015 }
+    stoploss: -0.03
+    exit_config: stoch_exit
+
+  - name: "mlb_maxabs_z1"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.0, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    multi_lookback: [168, 720]
+    lookback_combine: max_abs
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.015 }
+    stoploss: -0.03
+    exit_config: stoch_exit
+
+  - name: "mlb_all_z1_5"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.5, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    multi_lookback: [168, 720]
+    lookback_combine: all
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.015 }
+    stoploss: -0.03
+    exit_config: stoch_exit
+
+  - name: "mlb_mean_z1_5"
+    signal_type: funding
+    direction: both
+    regime_classifier: v4ema
+    params: { zscore: 1.5, lookback: 336, use_rsi: true, rsi_min: 35, rsi_max: 65 }
+    multi_lookback: [168, 720]
+    lookback_combine: mean
+    allowed_regimes: [bull, bear, range, volatile]
+    roi: { "0": 0.015 }
+    stoploss: -0.03
+    exit_config: stoch_exit
