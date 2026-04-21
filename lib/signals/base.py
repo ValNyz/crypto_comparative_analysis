@@ -72,6 +72,17 @@ class SignalConfig:
     # Regime detection implementation: "v3" (ADX/ATR — default) or "v4ema" (EMA alignment)
     regime_classifier: str = "v3"
 
+    # Multi-lookback funding z-score. If non-empty, the funding signal computes
+    # z-scores at these extra lookbacks (in addition to params["lookback"]) and
+    # combines them via `lookback_combine`. Empty = current single-lookback behavior.
+    #
+    # Example:
+    #   params: { lookback: 336, ... }
+    #   multi_lookback: [168, 720]
+    #   lookback_combine: "all"   # entry when z_168 & z_336 & z_720 all cross
+    multi_lookback: Optional[List[int]] = None
+    lookback_combine: str = "all"   # "all" | "mean" | "max_abs"
+
     def __post_init__(self):
         """Auto-detect allowed regimes if not specified."""
         if self.allowed_regimes is None:
@@ -100,6 +111,8 @@ class SignalConfig:
             allowed_regimes=data.get("allowed_regimes"),
             exit_config=data.get("exit_config", "none"),
             regime_classifier=data.get("regime_classifier", "v3"),
+            multi_lookback=data.get("multi_lookback"),
+            lookback_combine=data.get("lookback_combine", "all"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -115,6 +128,8 @@ class SignalConfig:
             "allowed_regimes": self.allowed_regimes,
             "exit_config": self.exit_config,
             "regime_classifier": self.regime_classifier,
+            "multi_lookback": self.multi_lookback,
+            "lookback_combine": self.lookback_combine,
         }
 
     def get_param(self, key: str, default: Any = None) -> Any:
@@ -134,4 +149,6 @@ class SignalConfig:
             allowed_regimes=self.allowed_regimes,
             exit_config=exit_name,
             regime_classifier=self.regime_classifier,
+            multi_lookback=list(self.multi_lookback) if self.multi_lookback else None,
+            lookback_combine=self.lookback_combine,
         )
