@@ -22,6 +22,19 @@ from .templates.standard import STRATEGY_TEMPLATE_STANDARD
 from .templates.funding import STRATEGY_TEMPLATE_FUNDING
 
 
+def _funding_extra_lookbacks_literal(primary_lookback: int, multi_lookback) -> str:
+    """Render the EXTRA_LOOKBACKS class-attribute value as a Python literal.
+
+    Extras exclude the primary lookback; the template always includes the primary
+    via `funding_zscore`. Returns '[]' when no multi-lookback is configured.
+    """
+    if not multi_lookback:
+        return "[]"
+    primary = int(primary_lookback)
+    extras = [int(x) for x in multi_lookback if int(x) != primary]
+    return repr(extras)
+
+
 def _funding_direction_loop(direction: str) -> str:
     # Note: template's reduction block sets zscore_long == zscore_short when
     # EXTRA_LOOKBACKS is empty, preserving single-lookback behavior.
@@ -179,6 +192,12 @@ class StrategyGenerator:
             # Dynamic-ROI methods (empty strings when disabled → no code emitted)
             custom_exit_method=generate_custom_exit_method(exit_cfg),
             partial_exit_method=generate_partial_exit_method(exit_cfg),
+            # Multi-lookback support (empty list → single-lookback behavior)
+            extra_lookbacks_list=_funding_extra_lookbacks_literal(
+                signal.params.get("lookback", 168),
+                signal.multi_lookback,
+            ),
+            lookback_combine=signal.lookback_combine,
         )
 
     def _generate_standard_strategy(
