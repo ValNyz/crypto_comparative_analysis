@@ -139,6 +139,8 @@ def expand_signal_template(
     allowed_regimes = template.get("allowed_regimes")
     exit_config = template.get("exit_config", "none")
     regime_classifier = template.get("regime_classifier", "v3")
+    multi_lookback = template.get("multi_lookback")
+    lookback_combine = template.get("lookback_combine", "all")
 
     # Separate expandable params (lists) from fixed params
     expand_params = {}
@@ -206,6 +208,8 @@ def expand_signal_template(
                 allowed_regimes=allowed_regimes,
                 exit_config=exit_config,
                 regime_classifier=regime_classifier,
+                multi_lookback=multi_lookback,
+                lookback_combine=lookback_combine,
             )
             signals.append(signal)
     else:
@@ -223,6 +227,8 @@ def expand_signal_template(
             allowed_regimes=allowed_regimes,
             exit_config=exit_list[0],
             regime_classifier=regime_classifier,
+            multi_lookback=multi_lookback,
+            lookback_combine=lookback_combine,
         )
         signals.append(signal)
 
