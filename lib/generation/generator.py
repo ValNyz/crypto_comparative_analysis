@@ -23,8 +23,10 @@ from .templates.funding import STRATEGY_TEMPLATE_FUNDING
 
 
 def _funding_direction_loop(direction: str) -> str:
-    long_entry = '("long", zscore <= -threshold, "enter_long")'
-    short_entry = '("short", zscore >= threshold, "enter_short")'
+    # Note: template's reduction block sets zscore_long == zscore_short when
+    # EXTRA_LOOKBACKS is empty, preserving single-lookback behavior.
+    long_entry = '("long", zscore_long <= -threshold, "enter_long")'
+    short_entry = '("short", zscore_short >= threshold, "enter_short")'
     if direction == "long":
         entries = [long_entry]
     elif direction == "short":
