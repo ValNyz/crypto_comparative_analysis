@@ -277,8 +277,11 @@ class {class_name}(IStrategy):
                 _atrp = float(
                     (dataframe.loc[mask, "atr"] / dataframe.loc[mask, "close"]).median()
                 ) if mask.any() else 0.0
+                # Tag layout: regime is LAST so framework's regime parser
+                # (lib/backtest/parser.py regex expecting `_<regime>` at tag end)
+                # continues to work. Token scanners for z/atr are order-agnostic.
                 dataframe.loc[mask, "enter_tag"] = (
-                    f"funding_{{direction}}_{{reg}}_z{{_zabs:.2f}}_atr{{_atrp:.4f}}"
+                    f"funding_{{direction}}_z{{_zabs:.2f}}_atr{{_atrp:.4f}}_{{reg}}"
                 )
         return dataframe
 
