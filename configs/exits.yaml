@@ -287,7 +287,7 @@ exits:
     zscore_roi_slope: 0.010
     zscore_roi_cap: 0.04
 
-  # Design 4 — Trailing activated at +0.5%, 0.5% giveback
+  # Design 4 — Trailing activated at +0.5%, 0.5% giveback (tight; legacy, kept for A/B)
   trailing_roi_05:
     use_trailing_roi: true
     trail_activate_pct: 0.005
@@ -298,6 +298,18 @@ exits:
     use_trailing_roi: true
     trail_activate_pct: 0.010
     trail_distance_pct: 0.008
+
+  # Design 4 — Recommended defaults post-bugfix (arm at +1%, 0.5% giveback)
+  trailing_roi_fixed:
+    use_trailing_roi: true
+    trail_activate_pct: 0.010
+    trail_distance_pct: 0.005
+
+  # Design 4 — Conservative (arm at +1.5%, 1% giveback — only lock in sizeable wins)
+  trailing_roi_wide:
+    use_trailing_roi: true
+    trail_activate_pct: 0.015
+    trail_distance_pct: 0.010
 
   # Design 5 — Partial exit: take 50% at +1%
   partial_exit_50_at1:

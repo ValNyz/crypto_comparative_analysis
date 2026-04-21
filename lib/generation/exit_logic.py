@@ -282,18 +282,21 @@ def generate_custom_exit_method(exit_config: ExitConfig) -> str:
     elif exit_config.use_trailing_roi:
         activate = exit_config.trail_activate_pct
         distance = exit_config.trail_distance_pct
+        # Track peak via current_profit (freqtrade's profit_ratio including fees/leverage)
+        # rather than reconstructing from open_rate/max_rate (which had unit-mismatch bugs).
+        # Peak is stashed on trade.__dict__ — persists across custom_exit calls within the trade.
         lines += [
             f"{ind}{ind}activate, distance = {activate}, {distance}",
-            f"{ind}{ind}if trade.is_short:",
-            f"{ind}{ind}{ind}peak_rate = trade.min_rate if trade.min_rate else current_rate",
-            f"{ind}{ind}{ind}peak_profit = (trade.open_rate - peak_rate) / trade.open_rate - 0.001",
-            f"{ind}{ind}else:",
-            f"{ind}{ind}{ind}peak_rate = trade.max_rate if trade.max_rate else current_rate",
-            f"{ind}{ind}{ind}peak_profit = (peak_rate - trade.open_rate) / trade.open_rate - 0.001",
-            f"{ind}{ind}if peak_profit < activate:",
+            f"{ind}{ind}prev_peak = float(getattr(trade, '_peak_profit', -10.0))",
+            f"{ind}{ind}peak = max(prev_peak, float(current_profit))",
+            f"{ind}{ind}try:",
+            f"{ind}{ind}{ind}trade._peak_profit = peak  # type: ignore",
+            f"{ind}{ind}except Exception:",
+            f"{ind}{ind}{ind}pass",
+            f"{ind}{ind}if peak < activate:",
             f"{ind}{ind}{ind}return None",
-            f"{ind}{ind}if current_profit < peak_profit - distance:",
-            f"{ind}{ind}{ind}return f'trail_peak{{int(peak_profit*10000)}}_out{{int(current_profit*10000)}}'",
+            f"{ind}{ind}if current_profit < peak - distance:",
+            f"{ind}{ind}{ind}return f'trail_peak{{int(peak*10000)}}_out{{int(current_profit*10000)}}'",
             f"{ind}{ind}return None",
         ]
 
