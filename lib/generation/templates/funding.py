@@ -90,6 +90,10 @@ class {class_name}(IStrategy):
     SPREAD_Z_THRESHOLD = {spread_z_threshold}
     USE_BTC_REGIME_FILTER = {use_btc_regime_filter}
     BTC_REGIME_ALLOWED = {btc_regime_allowed}
+    USE_VOLUME_ZSCORE_FILTER = {use_volume_zscore_filter}
+    VOLUME_ZSCORE_MIN = {volume_zscore_min}
+    USE_BBW_SQUEEZE_FILTER = {use_bbw_squeeze_filter}
+    BBW_PCT_MAX = {bbw_pct_max}
 
     REGIME_LOOKBACK = {regime_lookback}
     REGIME_ADX_THRESHOLD = {regime_adx_threshold}
@@ -272,6 +276,14 @@ class {class_name}(IStrategy):
         )
         dataframe['volume_sma'] = dataframe['volume'].rolling(20).mean()
         dataframe['volume_ratio'] = dataframe['volume'] / (dataframe['volume_sma'] + 1e-10)
+        # P1bis: volume zscore (mu/sigma rolling ~30 days at 1h ≈ 720 bars)
+        _vw = max(50, 720)
+        _vmu = dataframe['volume'].rolling(_vw, min_periods=max(50, _vw // 4)).mean()
+        _vsd = dataframe['volume'].rolling(_vw, min_periods=max(50, _vw // 4)).std()
+        dataframe['volume_zscore'] = ((dataframe['volume'] - _vmu) / (_vsd + 1e-10)).fillna(0.0)
+        # P1bis: Bollinger band-width percentile rank (rolling 100 bars)
+        _bbw = (dataframe['bb_upper'] - dataframe['bb_lower']) / (dataframe['bb_middle'] + 1e-10)
+        dataframe['bbw_pct'] = _bbw.rolling(100, min_periods=20).rank(pct=True).fillna(0.5)
         if self.USE_INTERCOIN_FILTER:
             ref_df = self.load_cross_coin_funding(self.INTERCOIN_REF, dataframe)
             _ref_col = f"ref_{{self.INTERCOIN_REF.lower()}}_funding_zscore"
@@ -496,6 +508,14 @@ class {class_name}(IStrategy):
             btc_regime_ok = dataframe['btc_regime'].isin(self.BTC_REGIME_ALLOWED)
         else:
             btc_regime_ok = True
+        if self.USE_VOLUME_ZSCORE_FILTER:
+            vz_ok = dataframe['volume_zscore'] > self.VOLUME_ZSCORE_MIN
+        else:
+            vz_ok = True
+        if self.USE_BBW_SQUEEZE_FILTER:
+            bbw_ok = dataframe['bbw_pct'] < self.BBW_PCT_MAX
+        else:
+            bbw_ok = True
 
         for direction, cond, col in {direction_loop}:
             _vel_ok = velocity_ok_long if direction == "long" else velocity_ok_short
@@ -505,7 +525,7 @@ class {class_name}(IStrategy):
             _dxy_ok = dxy_ok_long if direction == "long" else dxy_ok_short
             _etf_ok = etf_ok_long if direction == "long" else etf_ok_short
             _spread_ok = spread_ok_long if direction == "long" else spread_ok_short
-            full_cond = full_cond & _fng_ok & _vix_ok & _dxy_ok & _etf_ok & _spread_ok
+            full_cond = full_cond & _fng_ok & _vix_ok & _dxy_ok & _etf_ok & _spread_ok & vz_ok & bbw_ok
             if direction == "long":
                 full_cond = full_cond & trend_ok_long & ema_ok_long & bb_ok_long & stoch_ok_long & stoch_cross_long & macd_ok_long & candle_ok_long & engulf_ok_long
             elif direction == "short":
