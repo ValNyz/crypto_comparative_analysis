@@ -127,7 +127,7 @@ def expand_signal_template(
     signals = []
 
     # Paramètres qui sont des listes de valeurs, pas des options à expandre
-    PROTECTED_LIST_PARAMS = {"signals", "conditions", "extra_conditions"}
+    PROTECTED_LIST_PARAMS = {"signals", "conditions", "extra_conditions", "btc_regime_allowed"}
 
     # Extract template fields
     name_template = template.get("name", "unnamed")

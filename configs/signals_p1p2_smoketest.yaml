@@ -1,0 +1,46 @@
+# Smoke-test for P1+P2 implementation: exercises 4 representative ajouts
+# Run: python scripts/comparative_analysis_v3.py --signals configs/signals_p1p2_smoketest.yaml -p HYPE/USDC:USDC -t 1h
+funding_signals:
+  # 1. Funding contrarian + 2 macro filters (FNG + BTC regime)
+  - name: "smoke_funding_macros"
+    direction: both
+    params:
+      zscore: 1.5
+      lookback: 168
+      use_fng: true
+      fng_fear: 25
+      fng_consec: 3
+      use_btc_regime: true
+      btc_regime_allowed: [bull, range]
+    roi: { "0": 0.02 }
+    stoploss: -0.03
+    exit_config: none
+
+  # 2. Funding mode 'flip' (zero-cross of MA3)
+  - name: "smoke_funding_flip"
+    direction: long
+    params:
+      funding_mode: flip
+      use_rsi: true
+      rsi_min: 30
+      rsi_max: 70
+    roi: { "0": 0.02 }
+    stoploss: -0.03
+    exit_config: none
+
+technical_signals:
+  # 3. New trigger: Ichimoku Kumo cross (intra-bar indicator from extended INDICATORS_BLOCK)
+  - name: "smoke_ichimoku_long"
+    signal_type: ichimoku_kumo
+    direction: long
+    roi: { "0": 0.02 }
+    stoploss: -0.03
+
+  # 4. New trigger: ratio coin/BTC extreme (cross-coin loader block)
+  - name: "smoke_ratio_btc_long"
+    signal_type: ratio_btc_extreme
+    direction: long
+    params:
+      zscore: 2.0
+    roi: { "0": 0.02 }
+    stoploss: -0.03

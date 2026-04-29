@@ -265,7 +265,7 @@ class StrategyGenerator:
                 EXTERNAL_LOADERS_BLOCK.format(external_data_dir=_external_data_dir(self.config.data_dir))
                 if _needs_external_block(signal) else ""
             ),
-            cross_coin_block=(CROSS_COIN_LOADERS_BLOCK if _needs_cross_coin_block(signal) else ""),
+            cross_coin_block=(CROSS_COIN_LOADERS_BLOCK.format() if _needs_cross_coin_block(signal) else ""),
             # New macro filter flags
             use_fng_filter=signal.params.get("use_fng", False),
             fng_fear=signal.params.get("fng_fear", 25),
@@ -344,7 +344,7 @@ class StrategyGenerator:
                 EXTERNAL_LOADERS_BLOCK.format(external_data_dir=_external_data_dir(self.config.data_dir))
                 if _needs_external_block(signal) else ""
             ),
-            cross_coin_block=(CROSS_COIN_LOADERS_BLOCK if _needs_cross_coin_block(signal) else ""),
+            cross_coin_block=(CROSS_COIN_LOADERS_BLOCK.format() if _needs_cross_coin_block(signal) else ""),
             data_dir=self.config.data_dir,
         )
 
