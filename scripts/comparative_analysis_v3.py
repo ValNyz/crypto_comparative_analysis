@@ -171,6 +171,16 @@ Examples:
         "--debug", "-d", action="store_true", help="Enable debug output"
     )
     parser.add_argument(
+        "--skip-cached",
+        action="store_true",
+        help=(
+            "Skip backtests whose strategy class already has a matching "
+            "export in user_data/backtest_results/ (same class_name + "
+            "timeframe + timerange). Useful to resume a large grid after "
+            "a crash."
+        ),
+    )
+    parser.add_argument(
         "--list",
         "-l",
         action="store_true",
@@ -197,6 +207,7 @@ def main():
     # Apply CLI overrides
     config.max_workers = args.workers
     config.debug = args.debug
+    config.skip_cached = args.skip_cached
     config.enable_regime_filter = args.enable_filter
     config.regime_lookback = args.regime_lookback
     config.regime_adx_threshold = args.adx_threshold

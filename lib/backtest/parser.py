@@ -27,6 +27,7 @@ def parse_freqtrade_output(output: str) -> Dict:
         "sortino": 0.0,
         "calmar": 0.0,
         "max_dd_pct": 0.0,
+        "dd_duration_days": 0.0,
         "profit_factor": 0.0,
         "wins": 0,
         "losses": 0,
@@ -115,13 +116,23 @@ def _parse_metrics(output: str, result: Dict) -> Dict:
 
 
 def _parse_drawdown(output: str, result: Dict) -> Dict:
-    """Parse maximum drawdown."""
+    """Parse maximum drawdown + duration."""
     match = re.search(
         r"(?:Absolute drawdown|Max % of account)[^│┃|]*[│┃|][^│┃|]*([\d.]+)%", output
     )
     if match:
         try:
             result["max_dd_pct"] = float(match.group(1))
+        except ValueError:
+            pass
+
+    # Drawdown duration — freqtrade reports as "12 days 16:00:00" or "0 days …"
+    dur_match = re.search(
+        r"Drawdown\s+duration[^│┃|]*[│┃|][^│┃|]*?(\d+)\s+day", output
+    )
+    if dur_match:
+        try:
+            result["dd_duration_days"] = float(dur_match.group(1))
         except ValueError:
             pass
 

@@ -47,6 +47,11 @@ class Config:
     # Feature flags
     enable_regime_filter: bool = False
     debug: bool = False
+    # Skip backtests whose strategy class already has an export in
+    # user_data/backtest_results/ (matched on class_name + timeframe +
+    # timerange). Useful to resume large grids after a crash without
+    # re-running already-completed strats.
+    skip_cached: bool = False
 
     def __post_init__(self):
         """Ensure directories exist."""

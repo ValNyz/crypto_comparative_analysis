@@ -3,13 +3,15 @@
 # =============================================================================
 """Backtest runner with parallel execution."""
 
+import json
 import subprocess
 import time
+import zipfile
 
 import re
 import random
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
@@ -77,10 +79,200 @@ class BacktestRunner:
         self.export_dir = Path(config.freqtrade_path) / "user_data/backtest_results"
         self.export_dir.mkdir(parents=True, exist_ok=True)
 
+        # Cache index: built lazily (only when --skip-cached is on) to avoid
+        # paying for the meta.json scan when not needed. Keyed by (class_name,
+        # timeframe, timerange) → zip path. Cf. _build_export_index docstring
+        # for invalidation rules.
+        self.skip_cached: bool = bool(getattr(config, "skip_cached", False))
+        self._export_index: Optional[Dict[Tuple[str, str, str], Path]] = None
+        self.cache_hits: int = 0
+
     def _get_export_name(self, signal: SignalConfig, pair: str, timeframe: str) -> str:
         """Génère un nom de fichier unique pour l'export."""
         safe_pair = pair.replace("/", "_").replace(":", "_")
         return f"{signal.name}_{safe_pair}_{timeframe}"
+
+    def _build_export_index(self) -> Dict[Tuple[str, str, str], Path]:
+        """Scan user_data/backtest_results/*.meta.json → {(class_name, timeframe, timerange): zip_path}.
+
+        We key on `(class_name, timeframe, timerange)` so a cached entry is only
+        reused when the strategy class AND the backtest window match. Stake /
+        wallet / max_open_trades changes don't invalidate (less critical for
+        relative ranking) — bump cache via `--force-fresh` if needed.
+        """
+        index: Dict[Tuple[str, str, str], Path] = {}
+        timerange = self.config.timerange
+        for meta_path in self.export_dir.glob("*.meta.json"):
+            try:
+                meta = json.loads(meta_path.read_text())
+            except Exception:
+                continue
+            zip_path = meta_path.with_suffix("").with_suffix(".zip")
+            # Replace .meta.zip → .zip if the .with_suffix chain produced wrong path
+            if not zip_path.exists():
+                zip_path = Path(str(meta_path).replace(".meta.json", ".zip"))
+            if not zip_path.exists():
+                continue
+            for class_name, info in meta.items():
+                tf = info.get("timeframe", "") or ""
+                # Reconstitute timerange from start/end ts (in ms or s) → "YYYYMMDD-YYYYMMDD"
+                start_ts = info.get("backtest_start_ts")
+                end_ts = info.get("backtest_end_ts")
+                if start_ts and end_ts:
+                    # Some exports have ms, some seconds. Normalize.
+                    if start_ts > 10**11:  # ms
+                        start_ts = start_ts / 1000
+                        end_ts = end_ts / 1000
+                    from datetime import datetime, timezone
+                    start_str = datetime.fromtimestamp(start_ts, tz=timezone.utc).strftime("%Y%m%d")
+                    end_str = datetime.fromtimestamp(end_ts, tz=timezone.utc).strftime("%Y%m%d")
+                    cached_range = f"{start_str}-{end_str}"
+                else:
+                    cached_range = ""
+                # Only index if the timerange matches the current run's
+                if cached_range and cached_range != timerange:
+                    continue
+                index[(class_name, tf, timerange)] = zip_path
+        return index
+
+    def _load_cached_result(self, class_name: str, zip_path: Path) -> Optional[Dict]:
+        """Parse the inner backtest JSON from `zip_path` and return a result
+        dict matching `parse_freqtrade_output`'s schema.
+
+        Mirrors stdout-parser fields: trades, win_rate, profit_pct, sharpe,
+        sortino, calmar, max_dd_pct, dd_duration_days, profit_factor, wins,
+        losses, expectancy, sqn, monthly_*, regime_stats.
+        Returns None on any parse error so the caller falls back to running
+        freqtrade.
+        """
+        try:
+            with zipfile.ZipFile(zip_path) as z:
+                inner_name = next(
+                    (n for n in z.namelist()
+                     if n.endswith(".json") and "_config" not in n),
+                    None,
+                )
+                if not inner_name:
+                    return None
+                data = json.loads(z.read(inner_name))
+            strat = data.get("strategy", {}).get(class_name)
+            if not strat:
+                return None
+        except Exception:
+            return None
+
+        result: Dict = {
+            "trades": int(strat.get("total_trades", 0) or 0),
+            "win_rate": float(strat.get("winrate", 0) or 0) * 100.0,
+            "profit_pct": float(strat.get("profit_total", 0) or 0) * 100.0,
+            "avg_profit": float(strat.get("profit_mean", 0) or 0) * 100.0,
+            "sharpe": float(strat.get("sharpe", 0) or 0),
+            "sortino": float(strat.get("sortino", 0) or 0),
+            "calmar": float(strat.get("calmar", 0) or 0),
+            "max_dd_pct": float(strat.get("max_drawdown_account", 0) or 0) * 100.0,
+            "dd_duration_days": float(strat.get("drawdown_duration_s", 0) or 0) / 86400.0,
+            "profit_factor": float(strat.get("profit_factor", 0) or 0),
+            "wins": int(strat.get("wins", 0) or 0),
+            "losses": int(strat.get("losses", 0) or 0),
+            "expectancy": float(strat.get("expectancy", 0) or 0),
+            "sqn": float(strat.get("sqn", 0) or 0),
+            "monthly_profits": [],
+            "monthly_trades": [],
+            "monthly_pf": [],
+            "monthly_wr": [],
+            "months_profitable": 0,
+            "months_total": 0,
+            "best_month": 0.0,
+            "worst_month": 0.0,
+            "avg_month": 0.0,
+            "std_month": 0.0,
+            "consistency": 0.0,
+            "avg_monthly_pf": 0.0,
+            "avg_monthly_wr": 0.0,
+            "min_monthly_pf": 0.0,
+            "regime_stats": {},
+        }
+
+        # Monthly breakdown from periodic_breakdown.month
+        months = ((strat.get("periodic_breakdown") or {}).get("month") or [])
+        for m in months:
+            try:
+                result["monthly_profits"].append(float(m.get("profit_abs", 0) or 0))
+                result["monthly_trades"].append(int(m.get("trade_count", 0) or 0))
+                # profit_factor / win_rate may be missing on monthly; fall back to 0
+                result["monthly_pf"].append(float(m.get("profit_factor", 0) or 0))
+                wins_m = int(m.get("wins", 0) or 0)
+                tot_m = int(m.get("trade_count", 0) or 0)
+                result["monthly_wr"].append((wins_m / tot_m * 100) if tot_m else 0.0)
+            except (ValueError, TypeError):
+                pass
+        if result["monthly_profits"]:
+            mp = result["monthly_profits"]
+            import numpy as _np
+            result["months_total"] = len(mp)
+            result["months_profitable"] = sum(1 for p in mp if p > 0)
+            result["best_month"] = max(mp)
+            result["worst_month"] = min(mp)
+            result["avg_month"] = float(_np.mean(mp))
+            result["std_month"] = float(_np.std(mp)) if len(mp) > 1 else 0.0
+            result["consistency"] = result["months_profitable"] / len(mp) * 100.0
+            if result["monthly_pf"]:
+                result["avg_monthly_pf"] = float(_np.mean(result["monthly_pf"]))
+                result["min_monthly_pf"] = float(min(result["monthly_pf"]))
+            if result["monthly_wr"]:
+                result["avg_monthly_wr"] = float(_np.mean(result["monthly_wr"]))
+
+        # Regime stats from mix_tag_stats — entries are {key: 'tag', trades, profit_total, ...}
+        regime_buckets: Dict[str, Dict[str, list]] = {
+            r: {"long": [], "short": []} for r in ("bull", "bear", "range", "volatile")
+        }
+        for entry in (strat.get("mix_tag_stats") or []):
+            # `key` is either a string OR a list [enter_tag, exit_reason] in
+            # newer freqtrade exports. Normalize to the enter_tag string.
+            key_field = entry.get("key")
+            if isinstance(key_field, list) and key_field:
+                tag = str(key_field[0])
+            else:
+                tag = str(key_field or "")
+            if "_long_" in tag:
+                direction = "long"
+            elif "_short_" in tag:
+                direction = "short"
+            else:
+                continue
+            for regime in regime_buckets:
+                if tag.endswith(f"_{regime}"):
+                    trades_e = int(entry.get("trades", 0) or 0)
+                    wins_e = int(entry.get("wins", 0) or 0)
+                    losses_e = int(entry.get("losses", 0) or 0)
+                    profit_pct_e = float(entry.get("profit_total_pct", 0) or 0)
+                    regime_buckets[regime][direction].append({
+                        "trades": trades_e,
+                        "profit_pct": profit_pct_e,
+                        "wins": wins_e,
+                        "losses": losses_e,
+                        "win_rate": (wins_e / trades_e * 100) if trades_e else 0.0,
+                    })
+                    break
+        for regime, dirs in regime_buckets.items():
+            result["regime_stats"][regime] = {}
+            for direction in ("long", "short"):
+                lst = dirs[direction]
+                if not lst:
+                    continue
+                tot_tr = sum(s["trades"] for s in lst)
+                tot_w = sum(s["wins"] for s in lst)
+                tot_l = sum(s["losses"] for s in lst)
+                avg_pft = sum(s["profit_pct"] * s["trades"] for s in lst) / tot_tr if tot_tr else 0.0
+                result["regime_stats"][regime][direction] = {
+                    "trades": tot_tr,
+                    "profit_pct": avg_pft,
+                    "wins": tot_w,
+                    "losses": tot_l,
+                    "win_rate": (tot_w / tot_tr * 100) if tot_tr else 0.0,
+                }
+
+        return result
 
     def run_single(
         self,
@@ -102,6 +294,30 @@ class BacktestRunner:
         # Generate strategy
         class_name, strategy_path = self.generator.generate(signal, timeframe)
         actual_tf = signal.timeframe_override or timeframe
+
+        # Cache hit check — skip freqtrade entirely if a previous export
+        # for the same (class_name, tf, timerange) is on disk.
+        if self.skip_cached:
+            if self._export_index is None:
+                self._export_index = self._build_export_index()
+            cache_key = (class_name, actual_tf, self.config.timerange)
+            zip_path = self._export_index.get(cache_key)
+            if zip_path is not None:
+                cached = self._load_cached_result(class_name, zip_path)
+                if cached is not None and cached.get("trades", 0) > self.config.min_trades:
+                    cached.update({
+                        "signal": signal.name,
+                        "signal_type": signal.signal_type,
+                        "direction": signal.direction,
+                        "pair": pair,
+                        "timeframe": actual_tf,
+                        "allowed_regimes": signal.allowed_regimes,
+                        "exit_config": signal.exit_config,
+                    })
+                    self.completed += 1
+                    self.cache_hits += 1
+                    self._print_result(cached)
+                    return cached
 
         export_name = self._get_export_name(signal, pair, actual_tf)
 
@@ -335,32 +551,43 @@ class BacktestRunner:
                 print(
                     f"\n  ℹ️  Total retries (rate limit/timeout): {self.retries_total}"
                 )
+        if self.cache_hits > 0:
+            with print_lock:
+                print(
+                    f"  ⚡ Cache hits (skipped freqtrade): {self.cache_hits} / {self.total}"
+                )
 
         return pd.DataFrame(results)
 
     def _print_result(self, r: Dict):
-        """Print a single result with regime info."""
+        """Print a single result line: trades L/S, WR L/S, PnL, DD + duration, Sharpe."""
         with print_lock:
-            regime_info = ""
-            if r.get("regime_stats"):
-                parts = []
-                for reg in ["bull", "bear", "range", "volatile"]:
-                    reg_data = r["regime_stats"].get(reg, {})
-                    if reg_data:
-                        long_tr = reg_data.get("long", {}).get("trades", 0)
-                        short_tr = reg_data.get("short", {}).get("trades", 0)
-                        total_tr = long_tr + short_tr
-                        if total_tr > 0:
-                            parts.append(f"{self.abbrev[reg]}: {long_tr}L/{short_tr}S")
-                regime_info = f" │ {chr(9).join(parts)}" if parts else ""
+            # Aggregate L/S trade counts + wins across regimes
+            long_n = long_w = short_n = short_w = 0
+            for reg in ["bull", "bear", "range", "volatile"]:
+                rd = (r.get("regime_stats") or {}).get(reg, {})
+                long_d = rd.get("long", {}) or {}
+                short_d = rd.get("short", {}) or {}
+                long_n += int(long_d.get("trades", 0) or 0)
+                short_n += int(short_d.get("trades", 0) or 0)
+                long_w += int(long_d.get("wins", 0) or 0)
+                short_w += int(short_d.get("wins", 0) or 0)
+            long_wr = (long_w / long_n * 100) if long_n > 0 else 0.0
+            short_wr = (short_w / short_n * 100) if short_n > 0 else 0.0
+
+            ls_part = f"({long_n:>3d}L/{short_n:>3d}S)"
+            wr_part = f"WR={r['win_rate']:5.1f}%(L:{long_wr:>3.0f}%/S:{short_wr:>3.0f}%)"
+            dd_dur = r.get("dd_duration_days", 0) or 0
+            dd_part = f"DD={r['max_dd_pct']:5.1f}%({dd_dur:>3.0f}d)"
 
             print(
                 f"  [{self.completed:3d}/{self.total}] "
-                f"{r['signal']:<25} {r['pair']:<18} {r['timeframe']:<4} │ "
-                f"Tr={r['trades']:<3} WR={r['win_rate']:5.1f}% "
+                f"{r['signal']:<35} {r['pair']:<18} {r['timeframe']:<4} │ "
+                f"Tr={r['trades']:>4d} {ls_part} "
+                f"{wr_part} "
                 f"PnL={r['profit_pct']:+6.1f}% "
+                f"{dd_part} "
                 f"Sharpe={r['sharpe']:+5.2f}"
-                f"{regime_info}"
             )
 
     def _debug_output(self, signal_name: str, result):
