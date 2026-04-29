@@ -36,15 +36,38 @@ def _needs_external_block(signal: SignalConfig) -> bool:
     ])
 
 
+# Names of conditions in signal_conditions.yaml that reference cross-coin
+# columns (ratio_btc_*, ratio_eth_*). When a combo signal references any of
+# these, we must inject the cross_coin_block so those columns exist at runtime.
+_CROSS_COIN_CONDITION_NAMES = {
+    "ratio_btc_low", "ratio_btc_high",
+    "ratio_btc_breakout_up", "ratio_btc_breakout_down",
+    "ratio_eth_low", "ratio_eth_high",
+    "ratio_eth_breakout_up", "ratio_eth_breakout_down",
+}
+
+
 def _needs_cross_coin_block(signal: SignalConfig) -> bool:
-    """True if signal needs BTC/ETH OHLCV (regime filter or ratio trigger)."""
+    """True if signal needs BTC/ETH OHLCV (regime filter, ratio trigger, or combo conditions)."""
     p = signal.params
     if p.get("use_btc_regime") or p.get("use_funding_spread"):
         return True
-    return signal.signal_type in {
+    if signal.signal_type in {
         "ratio_btc_extreme", "ratio_btc_breakout",
         "ratio_eth_extreme", "ratio_eth_breakout",
-    }
+    }:
+        return True
+    # Combo signals: scan referenced condition names for cross-coin dependencies.
+    if signal.signal_type == "combo":
+        referenced = set()
+        for key in ("signals", "conditions", "extra_conditions"):
+            referenced.update(p.get(key, []) or [])
+        confirm = p.get("confirm")
+        if confirm:
+            referenced.add(confirm)
+        if referenced & _CROSS_COIN_CONDITION_NAMES:
+            return True
+    return False
 
 
 def _external_data_dir(data_dir: str) -> str:
