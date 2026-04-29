@@ -5,6 +5,7 @@
 
 STRATEGY_TEMPLATE_STANDARD = '''
 """Auto-generated V3: {name}"""
+from pathlib import Path
 from freqtrade.strategy import IStrategy
 import talib
 import pandas as pd
@@ -23,6 +24,8 @@ class {class_name}(IStrategy):
     trailing_only_offset_is_reached = True
     startup_candle_count = 250
 
+    DATA_DIR = Path("{data_dir}/futures")
+
     REGIME_LOOKBACK = {regime_lookback}
     REGIME_ADX_THRESHOLD = {regime_adx_threshold}
     REGIME_ADX_STRONG = {regime_adx_strong}
@@ -34,8 +37,21 @@ class {class_name}(IStrategy):
     ATR_MIN_PERCENTILE = {atr_min}
     ATR_MAX_PERCENTILE = {atr_max}
 
+{external_loaders_block}
+{cross_coin_block}
+
+    def get_coin(self, pair: str) -> str:
+        return pair.split("/")[0]
+
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        coin = self.get_coin(metadata["pair"])
 {indicators_block}
+        # Cross-coin merges (no-op when block is empty)
+        if hasattr(self, "merge_btc_regime"):
+            dataframe = self.merge_btc_regime(dataframe)
+        if hasattr(self, "merge_ratio_coin"):
+            dataframe = self.merge_ratio_coin(dataframe, "BTC", own_coin=coin)
+            dataframe = self.merge_ratio_coin(dataframe, "ETH", own_coin=coin)
         if self.USE_ATR_FILTER:
             _atr = talib.ATR(dataframe['high'], dataframe['low'], dataframe['close'], timeperiod=14)
             dataframe['atr_pct'] = _atr.rolling(72).apply(

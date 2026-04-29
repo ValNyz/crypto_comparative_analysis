@@ -345,6 +345,7 @@ class StrategyGenerator:
                 if _needs_external_block(signal) else ""
             ),
             cross_coin_block=(CROSS_COIN_LOADERS_BLOCK if _needs_cross_coin_block(signal) else ""),
+            data_dir=self.config.data_dir,
         )
 
     def generate_batch(self, signals: list, timeframe: str) -> list:
