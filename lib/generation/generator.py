@@ -24,6 +24,35 @@ from .templates.base import (
 )
 from .templates.standard import STRATEGY_TEMPLATE_STANDARD
 from .templates.funding import STRATEGY_TEMPLATE_FUNDING
+from .templates.external_block import EXTERNAL_LOADERS_BLOCK
+from .templates.cross_coin_block import CROSS_COIN_LOADERS_BLOCK
+
+
+def _needs_external_block(signal: SignalConfig) -> bool:
+    """True if any external-data filter is enabled in signal.params."""
+    p = signal.params
+    return any(p.get(f) for f in [
+        "use_fng", "use_vix", "use_dxy", "use_etf_flow", "use_funding_spread",
+    ])
+
+
+def _needs_cross_coin_block(signal: SignalConfig) -> bool:
+    """True if signal needs BTC/ETH OHLCV (regime filter or ratio trigger)."""
+    p = signal.params
+    if p.get("use_btc_regime") or p.get("use_funding_spread"):
+        return True
+    return signal.signal_type in {
+        "ratio_btc_extreme", "ratio_btc_breakout",
+        "ratio_eth_extreme", "ratio_eth_breakout",
+    }
+
+
+def _external_data_dir(data_dir: str) -> str:
+    """Auto-derive external data path from data_dir.
+
+    Layout: data_dir = <root>/user_data/data/hyperliquid → external = <root>/user_data/data/external.
+    """
+    return str(Path(data_dir).parent / "external")
 
 
 def _funding_extra_lookbacks_literal(primary_lookback: int, multi_lookback) -> str:
@@ -226,6 +255,39 @@ class StrategyGenerator:
                 signal.multi_lookback,
             ),
             lookback_combine=signal.lookback_combine,
+            # External & cross-coin block injection (conditional)
+            external_loaders_block=(
+                EXTERNAL_LOADERS_BLOCK.format(external_data_dir=_external_data_dir(self.config.data_dir))
+                if _needs_external_block(signal) else ""
+            ),
+            cross_coin_block=(CROSS_COIN_LOADERS_BLOCK if _needs_cross_coin_block(signal) else ""),
+            # New macro filter flags
+            use_fng_filter=signal.params.get("use_fng", False),
+            fng_fear=signal.params.get("fng_fear", 25),
+            fng_greed=signal.params.get("fng_greed", 75),
+            fng_consec_days=signal.params.get("fng_consec", 3),
+            use_vix_filter=signal.params.get("use_vix", False),
+            vix_max_long=signal.params.get("vix_max_long", 25),
+            vix_min_short=signal.params.get("vix_min_short", 25),
+            use_dxy_filter=signal.params.get("use_dxy", False),
+            dxy_slope_max_long=signal.params.get("dxy_slope_max_long", 0.01),
+            dxy_slope_min_short=signal.params.get("dxy_slope_min_short", 0.01),
+            use_etf_flow_filter=signal.params.get("use_etf_flow", False),
+            etf_ref=signal.params.get("etf_ref", "btc"),
+            etf_inflow_min_long=signal.params.get("etf_inflow_min_long", 200),
+            etf_outflow_max_short=signal.params.get("etf_outflow_max_short", 200),
+            use_funding_spread_filter=signal.params.get("use_funding_spread", False),
+            spread_ref=signal.params.get("spread_ref", "BTC"),
+            spread_z_threshold=signal.params.get("spread_z_threshold", 2.0),
+            use_btc_regime_filter=signal.params.get("use_btc_regime", False),
+            btc_regime_allowed=signal.params.get("btc_regime_allowed", ["bull", "range"]),
+            # Volume-zscore + BBW-squeeze filters (non-directional)
+            use_volume_zscore_filter=signal.params.get("use_volume_zscore", False),
+            volume_zscore_min=signal.params.get("volume_zscore_min", 2.5),
+            use_bbw_squeeze_filter=signal.params.get("use_bbw_squeeze", False),
+            bbw_pct_max=signal.params.get("bbw_pct_max", 0.15),
+            # Funding mode dispatch
+            funding_mode=signal.params.get("funding_mode", "zscore"),
         )
 
     def _generate_standard_strategy(
@@ -272,6 +334,12 @@ class StrategyGenerator:
             # Entry and exit logic
             entry_logic=entry_logic,
             exit_logic=exit_logic,
+            # External & cross-coin block injection (conditional)
+            external_loaders_block=(
+                EXTERNAL_LOADERS_BLOCK.format(external_data_dir=_external_data_dir(self.config.data_dir))
+                if _needs_external_block(signal) else ""
+            ),
+            cross_coin_block=(CROSS_COIN_LOADERS_BLOCK if _needs_cross_coin_block(signal) else ""),
         )
 
     def generate_batch(self, signals: list, timeframe: str) -> list:
