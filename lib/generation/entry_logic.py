@@ -52,6 +52,11 @@ def _get_signal_condition(signal: SignalConfig) -> str:
     use_adx_filter = signal.params.get("use_adx_filter", False)
     rsi_max = signal.params.get("rsi_max", 35)
     rsi_min = signal.params.get("rsi_min", 65)
+    # P1+P2 new triggers params
+    zscore_thr = signal.params.get("zscore", 2.0)
+    vwap_zscore_thr = signal.params.get("vwap_zscore_threshold", 2.0)
+    trend_thr = signal.params.get("trend_threshold", 1.0)
+    trend_chg_thr = signal.params.get("trend_chg_threshold", 0.3)
 
     # Map of (signal_type, direction) -> condition
     logic_map = {
@@ -260,6 +265,81 @@ def _get_signal_condition(signal: SignalConfig) -> str:
             (dataframe['adx'] > {adx_min}) &
             (dataframe['rsi_14'] > {rsi_min})
         )""",
+        # =====================================================================
+        # P2 / P1: NEW TRIGGERS
+        # =====================================================================
+        # Ichimoku Kumo cross (rising edge above kumo_top / below kumo_bottom)
+        (
+            "ichimoku_kumo",
+            "long",
+        ): "((dataframe['close'] > dataframe['kumo_top']) & (dataframe['close'].shift(1) <= dataframe['kumo_top'].shift(1)))",
+        (
+            "ichimoku_kumo",
+            "short",
+        ): "((dataframe['close'] < dataframe['kumo_bottom']) & (dataframe['close'].shift(1) >= dataframe['kumo_bottom'].shift(1)))",
+        # Ratio coin/BTC extreme (mean-rev) — needs cross_coin_block
+        (
+            "ratio_btc_extreme",
+            "long",
+        ): f"(dataframe['ratio_btc_zscore'] < -{zscore_thr})",
+        (
+            "ratio_btc_extreme",
+            "short",
+        ): f"(dataframe['ratio_btc_zscore'] > {zscore_thr})",
+        # Ratio coin/BTC breakout (momentum)
+        (
+            "ratio_btc_breakout",
+            "long",
+        ): "(dataframe['ratio_btc'] > dataframe['ratio_btc_high_break'])",
+        (
+            "ratio_btc_breakout",
+            "short",
+        ): "(dataframe['ratio_btc'] < dataframe['ratio_btc_low_break'])",
+        # Ratio coin/ETH extreme + breakout
+        (
+            "ratio_eth_extreme",
+            "long",
+        ): f"(dataframe['ratio_eth_zscore'] < -{zscore_thr})",
+        (
+            "ratio_eth_extreme",
+            "short",
+        ): f"(dataframe['ratio_eth_zscore'] > {zscore_thr})",
+        (
+            "ratio_eth_breakout",
+            "long",
+        ): "(dataframe['ratio_eth'] > dataframe['ratio_eth_high_break'])",
+        (
+            "ratio_eth_breakout",
+            "short",
+        ): "(dataframe['ratio_eth'] < dataframe['ratio_eth_low_break'])",
+        # Bull climax = bull-side capitulation (top) → only short
+        (
+            "bull_climax",
+            "short",
+        ): "((dataframe['volume_ratio'] > 2.5) & (dataframe['ret_1d'] > dataframe['ret_1d'].rolling(24).quantile(0.95)))",
+        # Bear climax = bear-side capitulation (bottom) → only long
+        (
+            "bear_climax",
+            "long",
+        ): "((dataframe['volume_ratio'] > 2.5) & (dataframe['ret_1d'] < dataframe['ret_1d'].rolling(24).quantile(0.05)))",
+        # VWAP intraday z-score — mean-reversion
+        (
+            "vwap_zscore",
+            "long",
+        ): f"(dataframe['vwap_zscore'] < -{vwap_zscore_thr})",
+        (
+            "vwap_zscore",
+            "short",
+        ): f"(dataframe['vwap_zscore'] > {vwap_zscore_thr})",
+        # Trend weakening — strong trend losing momentum (rebound point)
+        (
+            "trend_weakening",
+            "long",
+        ): f"((dataframe['trend_strength_c'] < -{trend_thr}) & (dataframe['trend_strength_chg'] > {trend_chg_thr}))",
+        (
+            "trend_weakening",
+            "short",
+        ): f"((dataframe['trend_strength_c'] > {trend_thr}) & (dataframe['trend_strength_chg'] < -{trend_chg_thr}))",
     }
 
     return logic_map.get((signal.signal_type, signal.direction), "False")
