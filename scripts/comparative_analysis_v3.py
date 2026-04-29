@@ -119,9 +119,13 @@ Examples:
     parser.add_argument(
         "--filter",
         "-f",
-        choices=["funding", "technical", "advanced", "combo"],
+        type=str,
         default=None,
-        help="Filter by signal type",
+        help=(
+            "YAML group name to test. Exact match (e.g. 'funding_baseline') or "
+            "wildcard (e.g. 'funding_macro_*'). Legacy values 'funding', "
+            "'technical', 'advanced', 'combo' map to the canonical *_signals groups."
+        ),
     )
     parser.add_argument(
         "--no-exits",

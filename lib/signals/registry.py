@@ -3,6 +3,7 @@
 # =============================================================================
 """Signal registry - combines all signal types and loads from YAML."""
 
+import fnmatch
 import itertools
 from copy import deepcopy
 from typing import List, Optional, Dict, Union, Any
@@ -11,6 +12,45 @@ from .base import SignalConfig
 from ..config.loader import load_yaml
 from ..config.base import Config
 from ..exits.registry import get_exit_names
+
+
+# Legacy filter aliases — kept for backward compat. Maps a short type-name
+# (the old --filter values) to the canonical YAML category it used to match.
+_LEGACY_FILTER_ALIASES = {
+    "funding": "funding_signals",
+    "technical": "technical_signals",
+    "advanced": "advanced_signals",
+    "combo": "combo_signals",
+}
+
+
+def _matches_category_filter(category: str, filter_spec: str) -> bool:
+    """True if `category` matches `filter_spec`.
+
+    filter_spec rules (in order):
+    - if filter_spec is a legacy alias (funding/technical/advanced/combo) →
+      strict match on the canonical *_signals category.
+    - if filter_spec contains a glob char (* or ?) → fnmatch wildcard.
+    - otherwise → strict equality.
+    """
+    if filter_spec in _LEGACY_FILTER_ALIASES:
+        return category == _LEGACY_FILTER_ALIASES[filter_spec]
+    if "*" in filter_spec or "?" in filter_spec:
+        return fnmatch.fnmatch(category, filter_spec)
+    return category == filter_spec
+
+
+def _signal_type_for_category(category: str) -> Optional[str]:
+    """Force a signal_type based on the YAML group prefix.
+
+    Returns the forced type ('funding' / 'combo'), or None if the entry's own
+    signal_type field should be used (technical / advanced / cross_coin / …).
+    """
+    if category.startswith("funding"):    # funding_signals, funding_baseline, funding_macro_*, funding_mode_*
+        return "funding"
+    if category.startswith("combo"):       # combo_signals, combo_baseline, combo_advanced, …
+        return "combo"
+    return None  # technical_signals, advanced_signals, cross_coin_*, advanced_*, … → use entry's signal_type
 
 
 def get_signal_configs(
@@ -62,33 +102,24 @@ def load_signals_from_yaml(
     data = load_yaml(filepath)
     signals = []
 
-    # Map of category names to signal_type
-    category_map = {
-        "funding_signals": "funding",
-        "technical_signals": None,  # Keep original type
-        "advanced_signals": None,
-        "combo_signals": "combo",
-    }
-
     # Get available exit configs for "all" expansion
     available_exits = get_exit_names(config)
 
-    for category, signal_type_override in category_map.items():
-        if category not in data:
+    # Iterate every top-level YAML key. Free-form group names are supported:
+    # {funding_baseline, funding_macro_fng, cross_coin_triggers, …}. The
+    # _signal_type_for_category prefix logic decides which signal_type each
+    # group forces (funding/combo) or whether it lets the entry decide.
+    for category, entries in data.items():
+        if not isinstance(entries, list):
+            continue  # skip non-list top-level keys (e.g. metadata blocks)
+
+        # Filter by category if requested (strict equality, legacy alias, or fnmatch wildcard)
+        if signal_filter and not _matches_category_filter(category, signal_filter):
             continue
 
-        # Filter by category if requested
-        if signal_filter:
-            if signal_filter == "funding" and category != "funding_signals":
-                continue
-            elif signal_filter == "technical" and category != "technical_signals":
-                continue
-            elif signal_filter == "advanced" and category != "advanced_signals":
-                continue
-            elif signal_filter == "combo" and category != "combo_signals":
-                continue
+        signal_type_override = _signal_type_for_category(category)
 
-        for sig_template in data[category]:
+        for sig_template in entries:
             if not sig_template.get("enabled", True):
                 continue
 
