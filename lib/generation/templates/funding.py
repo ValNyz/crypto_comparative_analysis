@@ -69,6 +69,27 @@ class {class_name}(IStrategy):
     HOUR_WINDOW_START = {hour_window_start}
     HOUR_WINDOW_END = {hour_window_end}
 
+    # === P1bis macro filters (default disabled) ===
+    USE_FNG_FILTER = {use_fng_filter}
+    FNG_FEAR = {fng_fear}
+    FNG_GREED = {fng_greed}
+    FNG_CONSEC_DAYS = {fng_consec_days}
+    USE_VIX_FILTER = {use_vix_filter}
+    VIX_MAX_LONG = {vix_max_long}
+    VIX_MIN_SHORT = {vix_min_short}
+    USE_DXY_FILTER = {use_dxy_filter}
+    DXY_SLOPE_MAX_LONG = {dxy_slope_max_long}
+    DXY_SLOPE_MIN_SHORT = {dxy_slope_min_short}
+    USE_ETF_FLOW_FILTER = {use_etf_flow_filter}
+    ETF_REF = '{etf_ref}'
+    ETF_INFLOW_MIN_LONG = {etf_inflow_min_long}
+    ETF_OUTFLOW_MAX_SHORT = {etf_outflow_max_short}
+    USE_FUNDING_SPREAD_FILTER = {use_funding_spread_filter}
+    SPREAD_REF = '{spread_ref}'
+    SPREAD_Z_THRESHOLD = {spread_z_threshold}
+    USE_BTC_REGIME_FILTER = {use_btc_regime_filter}
+    BTC_REGIME_ALLOWED = {btc_regime_allowed}
+
     REGIME_LOOKBACK = {regime_lookback}
     REGIME_ADX_THRESHOLD = {regime_adx_threshold}
     REGIME_ADX_STRONG = {regime_adx_strong}
@@ -211,6 +232,8 @@ class {class_name}(IStrategy):
             merged[c] = merged[c].fillna(0.0)
         return merged.drop(columns=["date_available"], errors="ignore")
 
+{external_loaders_block}
+{cross_coin_block}
 {regime_detection_block}
 
     def populate_indicators(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
@@ -249,6 +272,21 @@ class {class_name}(IStrategy):
                 dataframe[_ref_col] = _merged['funding_zscore'].values
             else:
                 dataframe[_ref_col] = 0.0
+
+        # === P1bis: external macro merges (each is no-op when its filter is disabled) ===
+        if self.USE_FNG_FILTER:
+            dataframe = self.merge_external_fng(dataframe)
+        if self.USE_VIX_FILTER:
+            dataframe = self.merge_external_vix(dataframe)
+        if self.USE_DXY_FILTER:
+            dataframe = self.merge_external_dxy(dataframe)
+        if self.USE_ETF_FLOW_FILTER:
+            dataframe = self.merge_external_etf_flow(dataframe, self.ETF_REF)
+        if self.USE_FUNDING_SPREAD_FILTER:
+            dataframe = self.merge_external_funding_spread(dataframe, self.SPREAD_REF)
+        if self.USE_BTC_REGIME_FILTER:
+            dataframe = self.merge_btc_regime(dataframe)
+
         return self._detect_regime_v3(dataframe)
 
     def populate_entry_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
@@ -396,9 +434,53 @@ class {class_name}(IStrategy):
         volume_ok = dataframe["volume"] > 0
         regime_ok = regime.isin(self.ALLOWED_REGIMES) if self.ENABLE_FILTER else True
 
+        # === P1bis: macro filter conditions ===
+        if self.USE_FNG_FILTER:
+            _fng_lo = (dataframe['fng_value'] <= self.FNG_FEAR).rolling(self.FNG_CONSEC_DAYS, min_periods=self.FNG_CONSEC_DAYS).min().fillna(0).astype(bool)
+            _fng_hi = (dataframe['fng_value'] >= self.FNG_GREED).rolling(self.FNG_CONSEC_DAYS, min_periods=self.FNG_CONSEC_DAYS).min().fillna(0).astype(bool)
+            fng_ok_long = _fng_lo
+            fng_ok_short = _fng_hi
+        else:
+            fng_ok_long = True
+            fng_ok_short = True
+        if self.USE_VIX_FILTER:
+            vix_ok_long = dataframe['vix_close'] < self.VIX_MAX_LONG
+            vix_ok_short = dataframe['vix_close'] > self.VIX_MIN_SHORT
+        else:
+            vix_ok_long = True
+            vix_ok_short = True
+        if self.USE_DXY_FILTER:
+            dxy_ok_long = dataframe['dxy_slope10'] < self.DXY_SLOPE_MAX_LONG
+            dxy_ok_short = dataframe['dxy_slope10'] > self.DXY_SLOPE_MIN_SHORT
+        else:
+            dxy_ok_long = True
+            dxy_ok_short = True
+        if self.USE_ETF_FLOW_FILTER:
+            etf_ok_long = dataframe['etf_flow_usd_m'] >= self.ETF_INFLOW_MIN_LONG
+            etf_ok_short = dataframe['etf_flow_usd_m'] <= -self.ETF_OUTFLOW_MAX_SHORT
+        else:
+            etf_ok_long = True
+            etf_ok_short = True
+        if self.USE_FUNDING_SPREAD_FILTER:
+            spread_ok_long = dataframe['funding_spread_zscore'] < -self.SPREAD_Z_THRESHOLD
+            spread_ok_short = dataframe['funding_spread_zscore'] > self.SPREAD_Z_THRESHOLD
+        else:
+            spread_ok_long = True
+            spread_ok_short = True
+        if self.USE_BTC_REGIME_FILTER:
+            btc_regime_ok = dataframe['btc_regime'].isin(self.BTC_REGIME_ALLOWED)
+        else:
+            btc_regime_ok = True
+
         for direction, cond, col in {direction_loop}:
             _vel_ok = velocity_ok_long if direction == "long" else velocity_ok_short
-            full_cond = cond & rsi_ok & volumef_ok & atr_ok & volume_ok & regime_ok & intercoin_ok & _vel_ok & transition_ok & hour_ok
+            full_cond = cond & rsi_ok & volumef_ok & atr_ok & volume_ok & regime_ok & intercoin_ok & _vel_ok & transition_ok & hour_ok & btc_regime_ok
+            _fng_ok = fng_ok_long if direction == "long" else fng_ok_short
+            _vix_ok = vix_ok_long if direction == "long" else vix_ok_short
+            _dxy_ok = dxy_ok_long if direction == "long" else dxy_ok_short
+            _etf_ok = etf_ok_long if direction == "long" else etf_ok_short
+            _spread_ok = spread_ok_long if direction == "long" else spread_ok_short
+            full_cond = full_cond & _fng_ok & _vix_ok & _dxy_ok & _etf_ok & _spread_ok
             if direction == "long":
                 full_cond = full_cond & trend_ok_long & ema_ok_long & bb_ok_long & stoch_ok_long & stoch_cross_long & macd_ok_long & candle_ok_long & engulf_ok_long
             elif direction == "short":
