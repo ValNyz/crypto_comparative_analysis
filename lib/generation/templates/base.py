@@ -143,3 +143,175 @@ REGIME_DETECTION_BLOCK = '''
 
         return dataframe
 '''
+
+
+REGIME_DETECTION_BLOCK_V4EMA_SLOPE = '''
+    def _detect_regime_v3(self, dataframe: DataFrame) -> DataFrame:
+        """EMA-alignment + EMA50-slope sub-classifier.
+
+        Base: v4ema (bull/bear/range/volatile).
+        Sub-state from slope = (ema_50[i] - ema_50[i-10]) / ema_50[i]
+          accel: slope > +0.003
+          decay: slope < -0.003
+          cons:  otherwise
+        Volatile regime is not sub-classified; regime_full stays 'volatile'.
+        """
+        lb = self.REGIME_LOOKBACK
+        if 'ema_200' not in dataframe.columns:
+            dataframe['ema_200'] = talib.EMA(dataframe['close'], timeperiod=200)
+        atr_norm = dataframe['atr'] / dataframe['close']
+        dataframe['atr_percentile'] = atr_norm.rolling(lb).apply(
+            lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False
+        )
+        bull_aligned = (dataframe['close'] > dataframe['ema_50']) & (dataframe['ema_50'] > dataframe['ema_200'])
+        bear_aligned = (dataframe['close'] < dataframe['ema_50']) & (dataframe['ema_50'] < dataframe['ema_200'])
+        conditions = [
+            bull_aligned & (dataframe['atr_percentile'] < 0.7),
+            bear_aligned & (dataframe['atr_percentile'] < 0.7),
+            dataframe['atr_percentile'] >= 0.7,
+        ]
+        dataframe['regime'] = np.select(conditions, ['bull', 'bear', 'volatile'], default='range')
+        slope = (dataframe['ema_50'] - dataframe['ema_50'].shift(10)) / dataframe['ema_50']
+        sub_conditions = [slope > 0.003, slope < -0.003]
+        dataframe['regime_sub'] = np.select(sub_conditions, ['accel', 'decay'], default='cons')
+        dataframe['regime_full'] = np.where(
+            dataframe['regime'] == 'volatile',
+            'volatile',
+            dataframe['regime'].astype(str) + '_' + dataframe['regime_sub'].astype(str)
+        )
+        dataframe['regime'] = dataframe['regime_full']
+        dataframe['regime_confidence'] = 0.5
+        return dataframe
+'''
+
+
+REGIME_DETECTION_BLOCK_V4EMA_ADX = '''
+    def _detect_regime_v3(self, dataframe: DataFrame) -> DataFrame:
+        """EMA-alignment + ADX-level sub-classifier.
+
+        Base: v4ema (bull/bear/range/volatile).
+        Sub-state from adx:
+          strong: adx >= 25
+          weak:   adx < 20
+          mid:    otherwise
+        Volatile regime is not sub-classified; regime_full stays 'volatile'.
+        """
+        lb = self.REGIME_LOOKBACK
+        if 'ema_200' not in dataframe.columns:
+            dataframe['ema_200'] = talib.EMA(dataframe['close'], timeperiod=200)
+        atr_norm = dataframe['atr'] / dataframe['close']
+        dataframe['atr_percentile'] = atr_norm.rolling(lb).apply(
+            lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False
+        )
+        bull_aligned = (dataframe['close'] > dataframe['ema_50']) & (dataframe['ema_50'] > dataframe['ema_200'])
+        bear_aligned = (dataframe['close'] < dataframe['ema_50']) & (dataframe['ema_50'] < dataframe['ema_200'])
+        conditions = [
+            bull_aligned & (dataframe['atr_percentile'] < 0.7),
+            bear_aligned & (dataframe['atr_percentile'] < 0.7),
+            dataframe['atr_percentile'] >= 0.7,
+        ]
+        dataframe['regime'] = np.select(conditions, ['bull', 'bear', 'volatile'], default='range')
+        sub_conditions = [dataframe['adx'] >= 25, dataframe['adx'] < 20]
+        dataframe['regime_sub'] = np.select(sub_conditions, ['strong', 'weak'], default='mid')
+        dataframe['regime_full'] = np.where(
+            dataframe['regime'] == 'volatile',
+            'volatile',
+            dataframe['regime'].astype(str) + '_' + dataframe['regime_sub'].astype(str)
+        )
+        dataframe['regime'] = dataframe['regime_full']
+        dataframe['regime_confidence'] = 0.5
+        return dataframe
+'''
+
+
+REGIME_DETECTION_BLOCK_V4EMA_ATR = '''
+    def _detect_regime_v3(self, dataframe: DataFrame) -> DataFrame:
+        """EMA-alignment + ATR-percentile sub-classifier.
+
+        Base: v4ema (bull/bear/range/volatile).
+        Sub-state from atr_pct (72-bar rank, 0-1):
+          expand:   atr_pct > 0.66
+          compress: atr_pct < 0.33
+          mid:      otherwise
+        Volatile regime is not sub-classified; regime_full stays 'volatile'.
+        """
+        lb = self.REGIME_LOOKBACK
+        if 'ema_200' not in dataframe.columns:
+            dataframe['ema_200'] = talib.EMA(dataframe['close'], timeperiod=200)
+        atr_norm = dataframe['atr'] / dataframe['close']
+        dataframe['atr_percentile'] = atr_norm.rolling(lb).apply(
+            lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False
+        )
+        bull_aligned = (dataframe['close'] > dataframe['ema_50']) & (dataframe['ema_50'] > dataframe['ema_200'])
+        bear_aligned = (dataframe['close'] < dataframe['ema_50']) & (dataframe['ema_50'] < dataframe['ema_200'])
+        conditions = [
+            bull_aligned & (dataframe['atr_percentile'] < 0.7),
+            bear_aligned & (dataframe['atr_percentile'] < 0.7),
+            dataframe['atr_percentile'] >= 0.7,
+        ]
+        dataframe['regime'] = np.select(conditions, ['bull', 'bear', 'volatile'], default='range')
+        _atr_pct72 = dataframe['atr'].rolling(72).apply(
+            lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False
+        )
+        sub_conditions = [_atr_pct72 > 0.66, _atr_pct72 < 0.33]
+        dataframe['regime_sub'] = np.select(sub_conditions, ['expand', 'compress'], default='mid')
+        dataframe['regime_full'] = np.where(
+            dataframe['regime'] == 'volatile',
+            'volatile',
+            dataframe['regime'].astype(str) + '_' + dataframe['regime_sub'].astype(str)
+        )
+        dataframe['regime'] = dataframe['regime_full']
+        dataframe['regime_confidence'] = 0.5
+        return dataframe
+'''
+
+
+REGIME_DETECTION_BLOCK_V4EMA_COMBO = '''
+    def _detect_regime_v3(self, dataframe: DataFrame) -> DataFrame:
+        """EMA-alignment + (slope x adx) 2x2 sub-classifier.
+
+        Base: v4ema (bull/bear/range/volatile).
+        Sub-state from slope (positive/negative) x adx (>=22/<22):
+          accel_strong:  slope > 0 AND adx >= 22
+          accel_weak:    slope > 0 AND adx <  22
+          cons_strong:   slope <= 0 AND adx >= 22
+          cons_weak:     slope <= 0 AND adx <  22
+        Volatile regime is not sub-classified; regime_full stays 'volatile'.
+        """
+        lb = self.REGIME_LOOKBACK
+        if 'ema_200' not in dataframe.columns:
+            dataframe['ema_200'] = talib.EMA(dataframe['close'], timeperiod=200)
+        atr_norm = dataframe['atr'] / dataframe['close']
+        dataframe['atr_percentile'] = atr_norm.rolling(lb).apply(
+            lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False
+        )
+        bull_aligned = (dataframe['close'] > dataframe['ema_50']) & (dataframe['ema_50'] > dataframe['ema_200'])
+        bear_aligned = (dataframe['close'] < dataframe['ema_50']) & (dataframe['ema_50'] < dataframe['ema_200'])
+        conditions = [
+            bull_aligned & (dataframe['atr_percentile'] < 0.7),
+            bear_aligned & (dataframe['atr_percentile'] < 0.7),
+            dataframe['atr_percentile'] >= 0.7,
+        ]
+        dataframe['regime'] = np.select(conditions, ['bull', 'bear', 'volatile'], default='range')
+        slope = (dataframe['ema_50'] - dataframe['ema_50'].shift(10)) / dataframe['ema_50']
+        _slope_up = slope > 0
+        _adx_strong = dataframe['adx'] >= 22
+        sub_conditions = [
+            _slope_up & _adx_strong,
+            _slope_up & ~_adx_strong,
+            ~_slope_up & _adx_strong,
+        ]
+        dataframe['regime_sub'] = np.select(
+            sub_conditions,
+            ['accel_strong', 'accel_weak', 'cons_strong'],
+            default='cons_weak',
+        )
+        dataframe['regime_full'] = np.where(
+            dataframe['regime'] == 'volatile',
+            'volatile',
+            dataframe['regime'].astype(str) + '_' + dataframe['regime_sub'].astype(str)
+        )
+        dataframe['regime'] = dataframe['regime_full']
+        dataframe['regime_confidence'] = 0.5
+        return dataframe
+'''

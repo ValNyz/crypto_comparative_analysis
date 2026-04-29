@@ -42,6 +42,8 @@ class {class_name}(IStrategy):
     ATR_MAX_PERCENTILE = {atr_max}
     USE_TREND_FILTER = {use_antitrend_filter}
     TREND_ADX_MAX = {adx_max}
+    USE_ADX_MIN_FILTER = {use_adx_min_filter}
+    ADX_MIN_THRESHOLD = {adx_min_threshold}
     USE_EMA_CONTRATREND = {use_ema_contra_filter}
     USE_BB_FILTER = {use_bb_filter}
     BB_LONG_MAX = {bb_long_max}
@@ -53,6 +55,19 @@ class {class_name}(IStrategy):
     USE_MACD_FILTER = {use_macd_filter}
     USE_CANDLE_FILTER = {use_candle_filter}
     USE_ENGULFING_FILTER = {use_engulfing_filter}
+    USE_INTERCOIN_FILTER = {use_intercoin_filter}
+    INTERCOIN_REF = '{intercoin_ref}'
+    INTERCOIN_NEUTRAL_THRESHOLD = {intercoin_neutral_threshold}
+    USE_VELOCITY_FILTER = {use_velocity_filter}
+    VELOCITY_PERIOD = {velocity_period}
+    VELOCITY_ZSCORE_MIN = {velocity_zscore_min}
+    VELOCITY_REVERT = {velocity_revert}
+    USE_TRANSITION_FILTER = {use_transition_filter}
+    TRANSITION_PREV_REGIME = '{transition_prev_regime}'
+    TRANSITION_WINDOW = {transition_window}
+    USE_HOUR_FILTER = {use_hour_filter}
+    HOUR_WINDOW_START = {hour_window_start}
+    HOUR_WINDOW_END = {hour_window_end}
 
     REGIME_LOOKBACK = {regime_lookback}
     REGIME_ADX_THRESHOLD = {regime_adx_threshold}
@@ -107,6 +122,12 @@ class {class_name}(IStrategy):
                     result["funding_mean"] = result["funding_rate"].rolling(lookback, min_periods=min_periods).mean()
                     result["funding_std"] = result["funding_rate"].rolling(lookback, min_periods=min_periods).std()
                     result["funding_zscore"] = (result["funding_rate"] - result["funding_mean"]) / (result["funding_std"] + 1e-10)
+                    # Funding velocity (B4): rate-of-change over VELOCITY_PERIOD funding bars.
+                    _vp = max(1, self.VELOCITY_PERIOD)
+                    _vel = result["funding_rate"].diff(_vp)
+                    _vel_mean = _vel.rolling(lookback, min_periods=min_periods).mean()
+                    _vel_std = _vel.rolling(lookback, min_periods=min_periods).std()
+                    result["funding_velocity_zscore"] = (_vel - _vel_mean) / (_vel_std + 1e-10)
                     # Multi-lookback extras
                     for _lb_hours in self.EXTRA_LOOKBACKS:
                         _lb_bars = max(1, _lb_hours // funding_tf)
@@ -119,24 +140,73 @@ class {class_name}(IStrategy):
                     logger.error(f"Error loading funding: {{e}}")
         return pd.DataFrame()
 
+    def load_cross_coin_funding(self, ref_coin: str, reference_df: pd.DataFrame) -> pd.DataFrame:
+        """Load funding for a different coin than the trading pair (E14).
+
+        Used by the inter-coin divergence filter.
+        Returns df with [date, funding_zscore] aligned to reference_df tz.
+        Returns empty df if data missing.
+        """
+        for pattern in [f"{{ref_coin}}_USDC_USDC-1h-funding_rate.feather",
+                        f"{{ref_coin}}_USDC_USDC-8h-funding_rate.feather",
+                        f"{{ref_coin}}_USDC-1h-funding_rate.feather"]:
+            path = self.DATA_DIR / pattern
+            if path.exists():
+                try:
+                    df = pd.read_feather(path)
+                    if "date" in df.columns:
+                        df["date"] = pd.to_datetime(df["date"])
+                    funding_tf = self._detect_funding_timeframe_hours(df)
+                    ref_tz = reference_df["date"].dt.tz
+                    if ref_tz is not None:
+                        if df["date"].dt.tz is None:
+                            df["date"] = df["date"].dt.tz_localize("UTC").dt.tz_convert(ref_tz)
+                        else:
+                            df["date"] = df["date"].dt.tz_convert(ref_tz)
+                    else:
+                        if df["date"].dt.tz is not None:
+                            df["date"] = df["date"].dt.tz_localize(None)
+                    result = pd.DataFrame()
+                    result["date"] = df["date"]
+                    result["funding_rate"] = df["open"].astype(float)
+                    lookback = max(1, self.FUNDING_LOOKBACK_HOURS // funding_tf)
+                    min_periods = max(20, lookback // 4)
+                    result["funding_mean"] = result["funding_rate"].rolling(lookback, min_periods=min_periods).mean()
+                    result["funding_std"] = result["funding_rate"].rolling(lookback, min_periods=min_periods).std()
+                    result["funding_zscore"] = (result["funding_rate"] - result["funding_mean"]) / (result["funding_std"] + 1e-10)
+                    return result.sort_values("date").drop_duplicates(subset=["date"])
+                except Exception as e:
+                    logger.warning(f"Failed loading cross-coin funding for {{ref_coin}}: {{e}}")
+        return pd.DataFrame()
+
     def _merge_funding_data(self, dataframe: pd.DataFrame, funding_df: pd.DataFrame) -> pd.DataFrame:
         extra_cols = [f"funding_zscore_lb{{lb}}" for lb in self.EXTRA_LOOKBACKS]
+        vel_col_present = "funding_velocity_zscore" in funding_df.columns if not funding_df.empty else False
         if funding_df.empty:
             dataframe["funding_rate"] = 0.0
             dataframe["funding_zscore"] = 0.0
+            dataframe["funding_velocity_zscore"] = 0.0
             for c in extra_cols:
                 dataframe[c] = 0.0
             return dataframe
         extra_cols_present = [c for c in extra_cols if c in funding_df.columns]
         keep = ["date", "funding_rate", "funding_zscore"] + extra_cols_present
+        if vel_col_present:
+            keep.append("funding_velocity_zscore")
         funding = funding_df[keep].copy()
         funding["date_available"] = funding["date"] + pd.Timedelta(minutes=self.FUNDING_DELAY_MINUTES)
         dataframe = dataframe.sort_values("date").reset_index(drop=True)
         merge_cols = ["date_available", "funding_rate", "funding_zscore"] + extra_cols_present
+        if vel_col_present:
+            merge_cols.append("funding_velocity_zscore")
         merged = pd.merge_asof(dataframe, funding[merge_cols],
                                left_on="date", right_on="date_available", direction="backward")
         merged["funding_rate"] = merged["funding_rate"].fillna(0.0)
         merged["funding_zscore"] = merged["funding_zscore"].fillna(0.0)
+        if vel_col_present:
+            merged["funding_velocity_zscore"] = merged["funding_velocity_zscore"].fillna(0.0)
+        else:
+            merged["funding_velocity_zscore"] = 0.0
         for c in extra_cols_present:
             merged[c] = merged[c].fillna(0.0)
         return merged.drop(columns=["date_available"], errors="ignore")
@@ -166,6 +236,19 @@ class {class_name}(IStrategy):
         )
         dataframe['volume_sma'] = dataframe['volume'].rolling(20).mean()
         dataframe['volume_ratio'] = dataframe['volume'] / (dataframe['volume_sma'] + 1e-10)
+        if self.USE_INTERCOIN_FILTER:
+            ref_df = self.load_cross_coin_funding(self.INTERCOIN_REF, dataframe)
+            _ref_col = f"ref_{{self.INTERCOIN_REF.lower()}}_funding_zscore"
+            if ref_df is not None and len(ref_df) > 0:
+                _merged = pd.merge_asof(
+                    dataframe.sort_values('date')[['date']].reset_index(drop=True),
+                    ref_df[['date', 'funding_zscore']].sort_values('date').reset_index(drop=True),
+                    on='date',
+                    direction='backward',
+                )
+                dataframe[_ref_col] = _merged['funding_zscore'].values
+            else:
+                dataframe[_ref_col] = 0.0
         return self._detect_regime_v3(dataframe)
 
     def populate_entry_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
@@ -208,6 +291,12 @@ class {class_name}(IStrategy):
         else:
             trend_ok_long = True
             trend_ok_short = True
+        # Pro-trend confirmation: require strong ADX with DI direction agreeing.
+        if self.USE_ADX_MIN_FILTER:
+            adx_strong_ok_long = (dataframe['adx'] >= self.ADX_MIN_THRESHOLD) & (dataframe['di_plus'] > dataframe['di_minus'])
+            adx_strong_ok_short = (dataframe['adx'] >= self.ADX_MIN_THRESHOLD) & (dataframe['di_minus'] > dataframe['di_plus'])
+            trend_ok_long = trend_ok_long & adx_strong_ok_long
+            trend_ok_short = trend_ok_short & adx_strong_ok_short
         if self.USE_EMA_CONTRATREND:
             ema_ok_long = dataframe['close'] < dataframe['ema_21']
             ema_ok_short = dataframe['close'] > dataframe['ema_21']
@@ -258,17 +347,64 @@ class {class_name}(IStrategy):
         else:
             engulf_ok_long = True
             engulf_ok_short = True
+        if self.USE_INTERCOIN_FILTER:
+            _ref_col = f"ref_{{self.INTERCOIN_REF.lower()}}_funding_zscore"
+            if _ref_col in dataframe.columns:
+                intercoin_ok = dataframe[_ref_col].abs() < self.INTERCOIN_NEUTRAL_THRESHOLD
+            else:
+                intercoin_ok = True
+        else:
+            intercoin_ok = True
+        # C10: Hour-of-day filter. HOUR_WINDOW_START <= hour <= HOUR_WINDOW_END (UTC).
+        # Wrap-around supported (e.g., 22-2 = 22:00 through 02:00).
+        if self.USE_HOUR_FILTER:
+            _hr = dataframe['date'].dt.hour
+            if self.HOUR_WINDOW_START <= self.HOUR_WINDOW_END:
+                hour_ok = (_hr >= self.HOUR_WINDOW_START) & (_hr <= self.HOUR_WINDOW_END)
+            else:
+                hour_ok = (_hr >= self.HOUR_WINDOW_START) | (_hr <= self.HOUR_WINDOW_END)
+        else:
+            hour_ok = True
+        # C7: Regime-transition filter. Fire only within N bars AFTER a regime change.
+        # If TRANSITION_PREV_REGIME set, require that the regime N bars ago was that specific value.
+        # ('' = any previous regime, just require a recent transition)
+        if self.USE_TRANSITION_FILTER:
+            _regime_window = regime.shift(self.TRANSITION_WINDOW)
+            _had_transition = regime != _regime_window
+            if self.TRANSITION_PREV_REGIME and self.TRANSITION_PREV_REGIME != '':
+                transition_ok = _had_transition & (_regime_window == self.TRANSITION_PREV_REGIME)
+            else:
+                transition_ok = _had_transition
+        else:
+            transition_ok = True
+        # B4: Funding velocity filter.
+        # velocity_revert=True -> require velocity zscore to have FLIPPED sign vs level
+        #   (level extreme negative, velocity positive = unwinding = enter long)
+        # velocity_revert=False -> require velocity magnitude above min (any direction)
+        if self.USE_VELOCITY_FILTER and "funding_velocity_zscore" in dataframe.columns:
+            _vz = dataframe["funding_velocity_zscore"]
+            if self.VELOCITY_REVERT:
+                # Long: level << 0 and velocity > 0 (unwinding up). Short: level >> 0 and velocity < 0.
+                velocity_ok_long = _vz > self.VELOCITY_ZSCORE_MIN
+                velocity_ok_short = _vz < -self.VELOCITY_ZSCORE_MIN
+            else:
+                velocity_ok_long = _vz.abs() > self.VELOCITY_ZSCORE_MIN
+                velocity_ok_short = _vz.abs() > self.VELOCITY_ZSCORE_MIN
+        else:
+            velocity_ok_long = True
+            velocity_ok_short = True
         volume_ok = dataframe["volume"] > 0
         regime_ok = regime.isin(self.ALLOWED_REGIMES) if self.ENABLE_FILTER else True
 
         for direction, cond, col in {direction_loop}:
-            full_cond = cond & rsi_ok & volumef_ok & atr_ok & volume_ok & regime_ok
+            _vel_ok = velocity_ok_long if direction == "long" else velocity_ok_short
+            full_cond = cond & rsi_ok & volumef_ok & atr_ok & volume_ok & regime_ok & intercoin_ok & _vel_ok & transition_ok & hour_ok
             if direction == "long":
                 full_cond = full_cond & trend_ok_long & ema_ok_long & bb_ok_long & stoch_ok_long & stoch_cross_long & macd_ok_long & candle_ok_long & engulf_ok_long
             elif direction == "short":
                 full_cond = full_cond & trend_ok_short & ema_ok_short & bb_ok_short & stoch_ok_short & stoch_cross_short & macd_ok_short & candle_ok_short & engulf_ok_short
 
-            for reg in ['bull', 'bear', 'range', 'volatile']:
+            for reg in self.ALLOWED_REGIMES:
                 mask = full_cond & (regime == reg)
                 dataframe.loc[mask, col] = 1
                 # Capture |z| and atr% at entry time for dynamic-ROI policies.

@@ -32,7 +32,7 @@ def generate_entry_logic(
     entry_col = "enter_long" if signal.direction == "long" else "enter_short"
 
     return f"""{indent}base_cond = {condition} & regime_ok
-{indent}for reg in ['bull', 'bear', 'range', 'volatile']:
+{indent}for reg in self.ALLOWED_REGIMES:
 {indent}    mask = base_cond & (regime == reg)
 {indent}    dataframe.loc[mask, '{entry_col}'] = 1
 {indent}    dataframe.loc[mask, 'enter_tag'] = f'{signal.name}_{{reg}}'"""
@@ -44,6 +44,14 @@ def _get_signal_condition(signal: SignalConfig) -> str:
     c = signal.params.get("candles", 3)
     dev = signal.params.get("dev", 2.0)
     vol_mult = signal.params.get("vol_mult", 2.0)
+
+    adx_min = signal.params.get("adx_min", 25)
+    adx_threshold = signal.params.get("adx_threshold", 25)
+    di_strong = signal.params.get("di_strong_threshold", 40)
+    di_weak = signal.params.get("di_weak_threshold", 15)
+    use_adx_filter = signal.params.get("use_adx_filter", False)
+    rsi_max = signal.params.get("rsi_max", 35)
+    rsi_min = signal.params.get("rsi_min", 65)
 
     # Map of (signal_type, direction) -> condition
     logic_map = {
@@ -200,6 +208,58 @@ def _get_signal_condition(signal: SignalConfig) -> str:
             "liquidation",
             "short",
         ): "(dataframe['volume'] > dataframe['volume'].rolling(20).mean() * 2) & (dataframe['is_red'])",
+        # =====================================================================
+        # DI CROSSOVER (simple, sans filtre ADX)
+        # =====================================================================
+        ("di_cross", "long"): f"""(
+            (dataframe['di_plus'] > dataframe['di_minus']) &
+            (dataframe['di_plus'].shift(1) <= dataframe['di_minus'].shift(1))
+            {f"& (dataframe['adx'] > {adx_min})" if use_adx_filter else ""}
+        )""",
+        ("di_cross", "short"): f"""(
+            (dataframe['di_minus'] > dataframe['di_plus']) &
+            (dataframe['di_minus'].shift(1) <= dataframe['di_plus'].shift(1))
+            {f"& (dataframe['adx'] > {adx_min})" if use_adx_filter else ""}
+        )""",
+        # =====================================================================
+        # ADX BREAKOUT (tendance naissante)
+        # =====================================================================
+        ("adx_breakout", "long"): f"""(
+            (dataframe['adx'] > {adx_threshold}) &
+            (dataframe['adx'].shift(1) <= {adx_threshold}) &
+            (dataframe['di_plus'] > dataframe['di_minus'])
+        )""",
+        ("adx_breakout", "short"): f"""(
+            (dataframe['adx'] > {adx_threshold}) &
+            (dataframe['adx'].shift(1) <= {adx_threshold}) &
+            (dataframe['di_minus'] > dataframe['di_plus'])
+        )""",
+        # =====================================================================
+        # DI EXTREME (mean reversion sur DI extrêmes)
+        # =====================================================================
+        ("di_extreme", "long"): f"""(
+            (dataframe['di_minus'] > {di_strong}) &
+            (dataframe['di_plus'] < {di_weak}) &
+            (dataframe['is_green'])
+        )""",
+        ("di_extreme", "short"): f"""(
+            (dataframe['di_plus'] > {di_strong}) &
+            (dataframe['di_minus'] < {di_weak}) &
+            (dataframe['is_red'])
+        )""",
+        # =====================================================================
+        # DI + RSI COMBO
+        # =====================================================================
+        ("di_rsi", "long"): f"""(
+            (dataframe['di_plus'] > dataframe['di_minus']) &
+            (dataframe['adx'] > {adx_min}) &
+            (dataframe['rsi_14'] < {rsi_max})
+        )""",
+        ("di_rsi", "short"): f"""(
+            (dataframe['di_minus'] > dataframe['di_plus']) &
+            (dataframe['adx'] > {adx_min}) &
+            (dataframe['rsi_14'] > {rsi_min})
+        )""",
     }
 
     return logic_map.get((signal.signal_type, signal.direction), "False")

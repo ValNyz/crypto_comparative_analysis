@@ -10,6 +10,7 @@ import re
 import random
 
 from typing import List, Dict, Optional
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 
@@ -49,7 +50,7 @@ class BacktestRunner:
         config,  # Config
         debug: bool = False,
         max_retries: int = 5,
-        base_delay: float = 30.0,
+        base_delay: float = 15.0,
         max_delay: float = 60.0,
     ):
         """
@@ -73,6 +74,14 @@ class BacktestRunner:
         self.retries_total = 0  # Compteur de retries
         self.abbrev = {"bull": "Bu", "bear": "Be", "range": "Ra", "volatile": "Vo"}
 
+        self.export_dir = Path(config.freqtrade_path) / "user_data/backtest_results"
+        self.export_dir.mkdir(parents=True, exist_ok=True)
+
+    def _get_export_name(self, signal: SignalConfig, pair: str, timeframe: str) -> str:
+        """Génère un nom de fichier unique pour l'export."""
+        safe_pair = pair.replace("/", "_").replace(":", "_")
+        return f"{signal.name}_{safe_pair}_{timeframe}"
+
     def run_single(
         self,
         signal,
@@ -94,6 +103,8 @@ class BacktestRunner:
         class_name, strategy_path = self.generator.generate(signal, timeframe)
         actual_tf = signal.timeframe_override or timeframe
 
+        export_name = self._get_export_name(signal, pair, actual_tf)
+
         # Build command
         cmd = [
             "freqtrade",
@@ -110,6 +121,10 @@ class BacktestRunner:
             self.config.timerange,
             "--pairs",
             pair,
+        ]
+        if self.config.timeframe_detail:
+            cmd += ["--timeframe-detail", self.config.timeframe_detail]
+        cmd += [
             "--datadir",
             self.config.data_dir,
             "--dry-run-wallet",
@@ -117,7 +132,9 @@ class BacktestRunner:
             "--stake-amount",
             str(self.config.stake_amount),
             "--export",
-            "none",
+            "trades",
+            "--export-filename",
+            export_name,
             "--max-open-trades",
             str(self.config.max_open_trades),
             "--breakdown",
@@ -135,10 +152,13 @@ class BacktestRunner:
                     cwd=self.config.freqtrade_path,
                 )
 
-                # Check for rate limit error
-                if is_rate_limit_error(result.stdout, result.stderr):
-                    combined = f"{result.stdout}\n{result.stderr}"
-                    print(RATE_LIMIT_REGEX.search(combined))
+                # Only treat as rate-limit if the process actually failed.
+                # CCXT has its own internal rate-limit retry — if freqtrade
+                # exited 0, the backtest succeeded even if "RateLimit" appears
+                # in the stderr traceback of an internally-recovered API call.
+                if result.returncode != 0 and is_rate_limit_error(
+                    result.stdout, result.stderr
+                ):
                     if attempt < self.max_retries:
                         delay = self._calculate_delay(attempt)
                         self._debug_output(signal.name, result)

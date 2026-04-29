@@ -7,6 +7,7 @@ STRATEGY_TEMPLATE_STANDARD = '''
 """Auto-generated V3: {name}"""
 from freqtrade.strategy import IStrategy
 import talib
+import pandas as pd
 from pandas import DataFrame
 import numpy as np
 
@@ -29,9 +30,17 @@ class {class_name}(IStrategy):
     REGIME_ATR_LOW = {regime_atr_low}
     ALLOWED_REGIMES = {allowed_regimes}
     ENABLE_FILTER = {enable_filter}
+    USE_ATR_FILTER = {use_atr_filter}
+    ATR_MIN_PERCENTILE = {atr_min}
+    ATR_MAX_PERCENTILE = {atr_max}
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 {indicators_block}
+        if self.USE_ATR_FILTER:
+            _atr = talib.ATR(dataframe['high'], dataframe['low'], dataframe['close'], timeperiod=14)
+            dataframe['atr_pct'] = _atr.rolling(72).apply(
+                lambda x: (x.iloc[-1] - x.min()) / (x.max() - x.min() + 1e-10), raw=False
+            )
         return self._detect_regime_v3(dataframe)
 
 {regime_detection_block}
@@ -42,6 +51,9 @@ class {class_name}(IStrategy):
             regime_ok = regime.isin(self.ALLOWED_REGIMES)
         else:
             regime_ok = True
+        if self.USE_ATR_FILTER:
+            _atr_ok = (dataframe['atr_pct'] >= self.ATR_MIN_PERCENTILE) & (dataframe['atr_pct'] <= self.ATR_MAX_PERCENTILE)
+            regime_ok = regime_ok & _atr_ok
 {entry_logic}
         return dataframe
 

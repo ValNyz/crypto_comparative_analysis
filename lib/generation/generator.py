@@ -17,6 +17,10 @@ from .templates.base import (
     INDICATORS_BLOCK,
     REGIME_DETECTION_BLOCK,
     REGIME_DETECTION_BLOCK_V4EMA,
+    REGIME_DETECTION_BLOCK_V4EMA_SLOPE,
+    REGIME_DETECTION_BLOCK_V4EMA_ADX,
+    REGIME_DETECTION_BLOCK_V4EMA_ATR,
+    REGIME_DETECTION_BLOCK_V4EMA_COMBO,
 )
 from .templates.standard import STRATEGY_TEMPLATE_STANDARD
 from .templates.funding import STRATEGY_TEMPLATE_FUNDING
@@ -58,6 +62,10 @@ from .exit_logic import (
 _REGIME_BLOCKS = {
     "v3": REGIME_DETECTION_BLOCK,
     "v4ema": REGIME_DETECTION_BLOCK_V4EMA,
+    "v4ema_slope": REGIME_DETECTION_BLOCK_V4EMA_SLOPE,
+    "v4ema_adx": REGIME_DETECTION_BLOCK_V4EMA_ADX,
+    "v4ema_atr": REGIME_DETECTION_BLOCK_V4EMA_ATR,
+    "v4ema_combo": REGIME_DETECTION_BLOCK_V4EMA_COMBO,
 }
 
 
@@ -171,8 +179,28 @@ class StrategyGenerator:
             # Anti-Trend Filter
             use_antitrend_filter=signal.params.get("use_antitrend", False),
             adx_max=signal.params.get("adx_max", 30),
+            # Pro-Trend Confirmation (B3: MTF-confluence proxy via strong ADX + DI direction)
+            use_adx_min_filter=signal.params.get("use_adx_min", False),
+            adx_min_threshold=signal.params.get("adx_min", 25),
             # EMA Contra-Trend
             use_ema_contra_filter=signal.params.get("use_ema_contra", False),
+            # Inter-coin divergence filter (E14)
+            use_intercoin_filter=signal.params.get("use_intercoin", False),
+            intercoin_ref=signal.params.get("intercoin_ref", "BTC"),
+            intercoin_neutral_threshold=signal.params.get("intercoin_neutral_threshold", 0.5),
+            # Funding velocity filter (B4)
+            use_velocity_filter=signal.params.get("use_velocity", False),
+            velocity_period=signal.params.get("velocity_period", 4),
+            velocity_zscore_min=signal.params.get("velocity_zscore_min", 0.5),
+            velocity_revert=signal.params.get("velocity_revert", True),
+            # Regime-transition filter (C7)
+            use_transition_filter=signal.params.get("use_transition", False),
+            transition_prev_regime=signal.params.get("transition_prev_regime", ""),
+            transition_window=signal.params.get("transition_window", 1),
+            # Hour-of-day filter (C10)
+            use_hour_filter=signal.params.get("use_hour_filter", False),
+            hour_window_start=signal.params.get("hour_window_start", 0),
+            hour_window_end=signal.params.get("hour_window_end", 23),
             # Regime parameters
             regime_lookback=self.config.regime_lookback,
             regime_adx_threshold=self.config.regime_adx_threshold,
@@ -233,6 +261,10 @@ class StrategyGenerator:
             regime_atr_low=self.config.regime_atr_low,
             allowed_regimes=signal.allowed_regimes,
             enable_filter=self.config.enable_regime_filter,
+            # ATR Filter (post-regime gate, default off)
+            use_atr_filter=signal.params.get("use_atr", False),
+            atr_min=signal.params.get("atr_min", 0.2),
+            atr_max=signal.params.get("atr_max", 0.8),
             # Indicators block
             indicators_block=INDICATORS_BLOCK,
             # Regime detection block

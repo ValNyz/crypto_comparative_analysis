@@ -82,6 +82,12 @@ Examples:
         default=None,
         help="Timerange for backtest (default: from config)",
     )
+    parser.add_argument(
+        "--timeframe-detail",
+        type=str,
+        default=None,
+        help="Fine-grained timeframe for exit fills, e.g. '1m'. Enables freqtrade's high-fidelity exit detection.",
+    )
 
     # Configuration
     parser.add_argument(
@@ -195,6 +201,8 @@ def main():
 
     if args.timerange:
         config.timerange = args.timerange
+    if args.timeframe_detail:
+        config.timeframe_detail = args.timeframe_detail
 
     # List pairs mode
     if args.list_pairs:

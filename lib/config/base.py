@@ -5,6 +5,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 
 @dataclass
@@ -25,6 +26,7 @@ class Config:
 
     # Backtest parameters
     timerange: str = "20250101-20250930"
+    timeframe_detail: Optional[str] = None  # e.g. "1m" for high-fidelity exit fills; None disables
     min_trades: int = 0
     min_sharpe: float = -2
     min_months: int = 2
