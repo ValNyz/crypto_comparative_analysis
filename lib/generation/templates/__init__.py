@@ -7,6 +7,7 @@ from .base import INDICATORS_BLOCK, REGIME_DETECTION_BLOCK
 from .standard import STRATEGY_TEMPLATE_STANDARD
 from .funding import STRATEGY_TEMPLATE_FUNDING
 from .external_block import EXTERNAL_LOADERS_BLOCK
+from .cross_coin_block import CROSS_COIN_LOADERS_BLOCK
 
 __all__ = [
     "INDICATORS_BLOCK",
@@ -14,4 +15,5 @@ __all__ = [
     "STRATEGY_TEMPLATE_STANDARD",
     "STRATEGY_TEMPLATE_FUNDING",
     "EXTERNAL_LOADERS_BLOCK",
+    "CROSS_COIN_LOADERS_BLOCK",
 ]
