@@ -1,9 +1,20 @@
 # =============================================================================
 # FILE: lib/generation/templates/base.py
 # =============================================================================
-"""Common template blocks shared across strategies."""
+"""Common template blocks shared across strategies.
 
-INDICATORS_BLOCK = """
+`INDICATORS_BLOCK` is kept as the union of all groups for backward compat.
+The generator now picks groups on demand via `_indicators_block_for(signal)`
+in generator.py — only INDICATORS_CORE is always injected, the rest are
+gated by signal_type / params / referenced combo conditions.
+"""
+
+# ============================================================
+# CORE — always injected (cheap, broadly used by triggers, regime detection,
+# climax conditions, and many filters). Includes volume_ratio + ret_1d which
+# are required by bull/bear climax conditions and macro filters.
+# ============================================================
+INDICATORS_CORE = """
         dataframe['rsi_14'] = talib.RSI(dataframe['close'], timeperiod=14)
         dataframe['rsi_21'] = talib.RSI(dataframe['close'], timeperiod=21)
         bb_upper, bb_middle, bb_lower = talib.BBANDS(dataframe['close'], timeperiod=20, nbdevup=2, nbdevdn=2)
@@ -40,7 +51,18 @@ INDICATORS_BLOCK = """
         dataframe['vwap_std'] = dataframe['close'].rolling(20).std()
         dataframe['roc'] = talib.ROC(dataframe['close'], timeperiod=12)
         dataframe['mfi'] = talib.MFI(dataframe['high'], dataframe['low'], dataframe['close'], dataframe['volume'], timeperiod=14)
-        # === P2 / P1: extended indicators (intra-bar, always computed) ===
+        # Volume ratio + ret_1d (cheap, used by climax conditions and macro filters)
+        dataframe['volume_ratio'] = dataframe['volume'] / (dataframe['volume'].rolling(20).mean() + 1e-10)
+        dataframe['ret_1d'] = dataframe['close'].pct_change(24)
+"""
+
+# ============================================================
+# Conditional groups — injected only when needed (signal_type / params /
+# combo conditions reference them). See _needed_indicator_groups in
+# generator.py for the gating logic.
+# ============================================================
+
+INDICATORS_KUMO = """
         # Ichimoku Kumo (no-lookahead via shift(26))
         _tenkan = (dataframe['high'].rolling(9).max() + dataframe['low'].rolling(9).min()) / 2
         _kijun  = (dataframe['high'].rolling(26).max() + dataframe['low'].rolling(26).min()) / 2
@@ -48,6 +70,9 @@ INDICATORS_BLOCK = """
         _senkou_b = ((dataframe['high'].rolling(52).max() + dataframe['low'].rolling(52).min()) / 2).shift(26)
         dataframe['kumo_top']    = pd.concat([_senkou_a, _senkou_b], axis=1).max(axis=1)
         dataframe['kumo_bottom'] = pd.concat([_senkou_a, _senkou_b], axis=1).min(axis=1)
+"""
+
+INDICATORS_VWAP_ZSCORE = """
         # VWAP zscore — daily UTC reset, expanding intraday std
         _day = dataframe['date'].dt.floor('D')
         _tp = (dataframe['high'] + dataframe['low'] + dataframe['close']) / 3
@@ -55,24 +80,41 @@ INDICATORS_BLOCK = """
         _dev = dataframe['close'] - dataframe['vwap_intra']
         _dev_std = _dev.groupby(_day).transform(lambda s: s.expanding().std())
         dataframe['vwap_zscore'] = (_dev / _dev_std.replace(0, np.nan)).fillna(0.0)
-        # BBW squeeze percentile (rolling 100)
+"""
+
+INDICATORS_BBW_PCT = """
+        # BBW squeeze percentile (rolling 100 + rank)
         _bbw = (dataframe['bb_upper'] - dataframe['bb_lower']) / (dataframe['bb_middle'] + 1e-10)
         dataframe['bbw_pct'] = _bbw.rolling(100, min_periods=20).rank(pct=True).fillna(0.5)
+"""
+
+INDICATORS_VOLUME_ZSCORE = """
         # Volume zscore (mu/sigma rolling 30j ≈ 720 at 1h)
         _vw = max(50, 720)
         _vmu = dataframe['volume'].rolling(_vw, min_periods=max(50, _vw // 4)).mean()
         _vsd = dataframe['volume'].rolling(_vw, min_periods=max(50, _vw // 4)).std()
         dataframe['volume_zscore'] = ((dataframe['volume'] - _vmu) / (_vsd + 1e-10)).fillna(0.0)
-        # Trend strength custom (unitless)
+"""
+
+INDICATORS_TREND_STRENGTH_C = """
+        # Trend strength custom (unitless, comparable cross-asset)
         _tw = max(20, 480)
         _ret = dataframe['close'].pct_change(_tw)
         _vol = dataframe['close'].pct_change().rolling(_tw).std()
         dataframe['trend_strength_c'] = _ret / (_vol * np.sqrt(_tw) + 1e-10)
         dataframe['trend_strength_chg'] = dataframe['trend_strength_c'].diff(24)
-        # Volume ratio + ret_1d (used by climax conditions)
-        dataframe['volume_ratio'] = dataframe['volume'] / (dataframe['volume'].rolling(20).mean() + 1e-10)
-        dataframe['ret_1d'] = dataframe['close'].pct_change(24)
 """
+
+# Backward compat: union of all groups. Anything importing INDICATORS_BLOCK
+# directly continues to get the full set. Generator-side code uses the split.
+INDICATORS_BLOCK = (
+    INDICATORS_CORE
+    + INDICATORS_KUMO
+    + INDICATORS_VWAP_ZSCORE
+    + INDICATORS_BBW_PCT
+    + INDICATORS_VOLUME_ZSCORE
+    + INDICATORS_TREND_STRENGTH_C
+)
 
 REGIME_DETECTION_BLOCK_V4EMA = '''
     def _detect_regime_v3(self, dataframe: DataFrame) -> DataFrame:

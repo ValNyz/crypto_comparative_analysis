@@ -15,6 +15,12 @@ from ..utils.helpers import sanitize_class_name
 
 from .templates.base import (
     INDICATORS_BLOCK,
+    INDICATORS_CORE,
+    INDICATORS_KUMO,
+    INDICATORS_VWAP_ZSCORE,
+    INDICATORS_BBW_PCT,
+    INDICATORS_VOLUME_ZSCORE,
+    INDICATORS_TREND_STRENGTH_C,
     REGIME_DETECTION_BLOCK,
     REGIME_DETECTION_BLOCK_V4EMA,
     REGIME_DETECTION_BLOCK_V4EMA_SLOPE,
@@ -76,6 +82,87 @@ def _external_data_dir(data_dir: str) -> str:
     Layout: data_dir = <root>/user_data/data/hyperliquid → external = <root>/user_data/data/external.
     """
     return str(Path(data_dir).parent / "external")
+
+
+# === Conditional indicator blocks ===
+# When a group is referenced (signal_type, params filter, or combo condition),
+# its compute block is appended to INDICATORS_CORE. This avoids paying for
+# Ichimoku/VWAP zscore/etc. on strategies that never use them.
+
+# Combo condition names → indicator group required by the condition expression
+_COMBO_CONDITION_TO_GROUP = {
+    # Ichimoku
+    "kumo_bull_cross": "kumo", "kumo_bear_cross": "kumo",
+    "kumo_above": "kumo", "kumo_below": "kumo",
+    # VWAP zscore
+    "vwap_oversold": "vwap_zscore", "vwap_overbought": "vwap_zscore",
+    # BBW squeeze
+    "bbw_squeeze": "bbw_pct",
+    # Volume zscore
+    "volume_zspike": "volume_zscore",
+    # Trend strength
+    "trend_decay_long": "trend_strength_c", "trend_decay_short": "trend_strength_c",
+    # bull_climax / bear_climax use volume_ratio + ret_1d which live in CORE → no extra group
+}
+
+# signal_type → indicator group required by entry_logic.py:logic_map condition
+_SIGNAL_TYPE_TO_GROUP = {
+    "ichimoku_kumo": "kumo",
+    "vwap_zscore": "vwap_zscore",
+    "trend_weakening": "trend_strength_c",
+}
+
+
+def _needed_indicator_groups(signal: SignalConfig) -> set:
+    """Return the set of conditional indicator group names this signal needs.
+
+    'core' is always implicit; the returned set covers only EXTRA groups
+    (kumo, vwap_zscore, bbw_pct, volume_zscore, trend_strength_c).
+    """
+    groups: set = set()
+    p = signal.params
+
+    # 1) Direct signal_type triggers (entry_logic.py:logic_map)
+    if signal.signal_type in _SIGNAL_TYPE_TO_GROUP:
+        groups.add(_SIGNAL_TYPE_TO_GROUP[signal.signal_type])
+
+    # 2) Filter flags (apply to triggers + funding template)
+    if p.get("use_volume_zscore"):
+        groups.add("volume_zscore")
+    if p.get("use_bbw_squeeze"):
+        groups.add("bbw_pct")
+
+    # 3) Combo signals: scan referenced condition names
+    if signal.signal_type == "combo":
+        referenced = set()
+        for key in ("signals", "conditions", "extra_conditions"):
+            referenced.update(p.get(key, []) or [])
+        confirm = p.get("confirm")
+        if confirm:
+            referenced.add(confirm)
+        for cond in referenced:
+            grp = _COMBO_CONDITION_TO_GROUP.get(cond)
+            if grp:
+                groups.add(grp)
+
+    return groups
+
+
+def _indicators_block_for(signal: SignalConfig) -> str:
+    """Build the indicators_block string for `signal` = CORE + only needed groups."""
+    groups = _needed_indicator_groups(signal)
+    parts = [INDICATORS_CORE]
+    if "kumo" in groups:
+        parts.append(INDICATORS_KUMO)
+    if "vwap_zscore" in groups:
+        parts.append(INDICATORS_VWAP_ZSCORE)
+    if "bbw_pct" in groups:
+        parts.append(INDICATORS_BBW_PCT)
+    if "volume_zscore" in groups:
+        parts.append(INDICATORS_VOLUME_ZSCORE)
+    if "trend_strength_c" in groups:
+        parts.append(INDICATORS_TREND_STRENGTH_C)
+    return "".join(parts)
 
 
 def _funding_extra_lookbacks_literal(primary_lookback: int, multi_lookback) -> str:
@@ -356,7 +443,7 @@ class StrategyGenerator:
             atr_min=signal.params.get("atr_min", 0.2),
             atr_max=signal.params.get("atr_max", 0.8),
             # Indicators block
-            indicators_block=INDICATORS_BLOCK,
+            indicators_block=_indicators_block_for(signal),
             # Regime detection block
             regime_detection_block=_regime_block_for(signal.regime_classifier),
             # Entry and exit logic
