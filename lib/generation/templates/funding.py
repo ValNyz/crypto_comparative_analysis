@@ -30,6 +30,7 @@ class {class_name}(IStrategy):
     # Multi-lookback funding z-score. Empty list = single-lookback (current behavior).
     EXTRA_LOOKBACKS = {extra_lookbacks_list}
     LOOKBACK_COMBINE = '{lookback_combine}'
+    FUNDING_MODE = '{funding_mode}'
     FUNDING_DELAY_MINUTES = 5
     USE_RSI_FILTER = {use_rsi_filter}
     RSI_MIN = {rsi_min}
@@ -143,6 +144,14 @@ class {class_name}(IStrategy):
                     result["funding_mean"] = result["funding_rate"].rolling(lookback, min_periods=min_periods).mean()
                     result["funding_std"] = result["funding_rate"].rolling(lookback, min_periods=min_periods).std()
                     result["funding_zscore"] = (result["funding_rate"] - result["funding_mean"]) / (result["funding_std"] + 1e-10)
+                    # Funding mode 'flip': MA3 zero-cross
+                    result["funding_ma3"] = result["funding_rate"].rolling(3, min_periods=1).mean()
+                    # Funding mode 'cum_7d': rolling 7d sum, z-scored vs lookback
+                    _cum_w = max(3, 21 // funding_tf if funding_tf > 0 else 21)
+                    result["funding_cum_7d"] = result["funding_rate"].rolling(_cum_w, min_periods=max(1, _cum_w // 2)).sum()
+                    _cum_mu = result["funding_cum_7d"].rolling(lookback, min_periods=min_periods).mean()
+                    _cum_sd = result["funding_cum_7d"].rolling(lookback, min_periods=min_periods).std()
+                    result["funding_cum_7d_z"] = (result["funding_cum_7d"] - _cum_mu) / (_cum_sd + 1e-10)
                     # Funding velocity (B4): rate-of-change over VELOCITY_PERIOD funding bars.
                     _vp = max(1, self.VELOCITY_PERIOD)
                     _vel = result["funding_rate"].diff(_vp)
@@ -207,23 +216,27 @@ class {class_name}(IStrategy):
             dataframe["funding_rate"] = 0.0
             dataframe["funding_zscore"] = 0.0
             dataframe["funding_velocity_zscore"] = 0.0
+            dataframe["funding_ma3"] = 0.0
+            dataframe["funding_cum_7d_z"] = 0.0
             for c in extra_cols:
                 dataframe[c] = 0.0
             return dataframe
         extra_cols_present = [c for c in extra_cols if c in funding_df.columns]
-        keep = ["date", "funding_rate", "funding_zscore"] + extra_cols_present
+        keep = ["date", "funding_rate", "funding_zscore", "funding_ma3", "funding_cum_7d_z"] + extra_cols_present
         if vel_col_present:
             keep.append("funding_velocity_zscore")
         funding = funding_df[keep].copy()
         funding["date_available"] = funding["date"] + pd.Timedelta(minutes=self.FUNDING_DELAY_MINUTES)
         dataframe = dataframe.sort_values("date").reset_index(drop=True)
-        merge_cols = ["date_available", "funding_rate", "funding_zscore"] + extra_cols_present
+        merge_cols = ["date_available", "funding_rate", "funding_zscore", "funding_ma3", "funding_cum_7d_z"] + extra_cols_present
         if vel_col_present:
             merge_cols.append("funding_velocity_zscore")
         merged = pd.merge_asof(dataframe, funding[merge_cols],
                                left_on="date", right_on="date_available", direction="backward")
         merged["funding_rate"] = merged["funding_rate"].fillna(0.0)
         merged["funding_zscore"] = merged["funding_zscore"].fillna(0.0)
+        merged["funding_ma3"] = merged["funding_ma3"].fillna(0.0)
+        merged["funding_cum_7d_z"] = merged["funding_cum_7d_z"].fillna(0.0)
         if vel_col_present:
             merged["funding_velocity_zscore"] = merged["funding_velocity_zscore"].fillna(0.0)
         else:
@@ -318,6 +331,18 @@ class {class_name}(IStrategy):
             zscore_short = dataframe[_z_cols[0]]
         # Backward-compat alias for downstream code that expects a single `zscore`
         zscore = zscore_long
+
+        # === Funding mode dispatch (zscore = default, current behavior) ===
+        if self.FUNDING_MODE == 'flip':
+            base_long  = (dataframe['funding_ma3'] > 0) & (dataframe['funding_ma3'].shift(1) <= 0)
+            base_short = (dataframe['funding_ma3'] < 0) & (dataframe['funding_ma3'].shift(1) >= 0)
+        elif self.FUNDING_MODE == 'cum_7d':
+            base_long  = dataframe['funding_cum_7d_z'] <= -threshold
+            base_short = dataframe['funding_cum_7d_z'] >= threshold
+        else:  # 'zscore'
+            base_long  = zscore_long  <= -threshold
+            base_short = zscore_short >= threshold
+
         rsi_ok = ((dataframe["rsi_14"] >= self.RSI_MIN) & (dataframe["rsi_14"] <= self.RSI_MAX)) if self.USE_RSI_FILTER else True
         volumef_ok = ((dataframe['volume_ratio'] >= self.VOLUME_MIN_RATIO) & (dataframe['volume_ratio'] <= self.VOLUME_MAX_RATIO)) if self.USE_VOLUME_FILTER else True
         atr_ok = ((dataframe['atr_pct'] >= self.ATR_MIN_PERCENTILE) & (dataframe['atr_pct'] <= self.ATR_MAX_PERCENTILE)) if self.USE_ATR_FILTER else True

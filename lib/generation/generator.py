@@ -69,10 +69,15 @@ def _funding_extra_lookbacks_literal(primary_lookback: int, multi_lookback) -> s
 
 
 def _funding_direction_loop(direction: str) -> str:
-    # Note: template's reduction block sets zscore_long == zscore_short when
-    # EXTRA_LOOKBACKS is empty, preserving single-lookback behavior.
-    long_entry = '("long", zscore_long <= -threshold, "enter_long")'
-    short_entry = '("short", zscore_short >= threshold, "enter_short")'
+    """Direction-loop literal for the funding template.
+
+    Uses base_long / base_short which are dispatched by FUNDING_MODE in
+    populate_entry_trend (zscore | flip | cum_7d). The template's reduction
+    block sets zscore_long == zscore_short when EXTRA_LOOKBACKS is empty,
+    preserving single-lookback behavior in mode 'zscore'.
+    """
+    long_entry = '("long", base_long, "enter_long")'
+    short_entry = '("short", base_short, "enter_short")'
     if direction == "long":
         entries = [long_entry]
     elif direction == "short":
