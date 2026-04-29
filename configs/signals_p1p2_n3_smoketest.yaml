@@ -1,0 +1,25 @@
+# Niveau 3 smoke-test: standard.py with macro filters + combo with cross-coin condition
+# Run: python scripts/comparative_analysis_v3.py --signals configs/signals_p1p2_n3_smoketest.yaml -p HYPE/USDC:USDC -t 1h
+technical_signals:
+  # Standard rsi trigger gated by BTC regime (Niveau 3 — macros sur standard.py)
+  - name: "n3_rsi_btcreg"
+    signal_type: rsi
+    direction: long
+    params:
+      threshold: 30
+      use_btc_regime: true
+      btc_regime_allowed: [bull, range]
+    roi: { "0": 0.02 }
+    stoploss: -0.03
+
+combo_signals:
+  # Combo using both an internal condition (rsi_os) and a cross-coin one (ratio_btc_low)
+  # → Niveau 2 must inject cross_coin_block automatically.
+  - name: "n2_combo_rsi_x_ratio_btc"
+    signal_type: combo
+    direction: long
+    params:
+      signals: [rsi_os, ratio_btc_low]
+      min_signals: 1
+    roi: { "0": 0.02 }
+    stoploss: -0.03
