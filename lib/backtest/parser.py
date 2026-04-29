@@ -28,6 +28,7 @@ def parse_freqtrade_output(output: str) -> Dict:
         "calmar": 0.0,
         "max_dd_pct": 0.0,
         "dd_duration_days": 0.0,
+        "market_change_pct": 0.0,
         "profit_factor": 0.0,
         "wins": 0,
         "losses": 0,
@@ -133,6 +134,16 @@ def _parse_drawdown(output: str, result: Dict) -> Dict:
     if dur_match:
         try:
             result["dd_duration_days"] = float(dur_match.group(1))
+        except ValueError:
+            pass
+
+    # Market change over backtest period (BTC/pair price change)
+    mkt_match = re.search(
+        r"Market\s+change[^│┃|]*[│┃|][^│┃|]*?([-\d.]+)%", output
+    )
+    if mkt_match:
+        try:
+            result["market_change_pct"] = float(mkt_match.group(1))
         except ValueError:
             pass
 

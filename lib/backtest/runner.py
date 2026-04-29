@@ -171,6 +171,7 @@ class BacktestRunner:
             "calmar": float(strat.get("calmar", 0) or 0),
             "max_dd_pct": float(strat.get("max_drawdown_account", 0) or 0) * 100.0,
             "dd_duration_days": float(strat.get("drawdown_duration_s", 0) or 0) / 86400.0,
+            "market_change_pct": float(strat.get("market_change", 0) or 0) * 100.0,
             "profit_factor": float(strat.get("profit_factor", 0) or 0),
             "wins": int(strat.get("wins", 0) or 0),
             "losses": int(strat.get("losses", 0) or 0),
@@ -297,9 +298,9 @@ class BacktestRunner:
 
         # Cache hit check — skip freqtrade entirely if a previous export
         # for the same (class_name, tf, timerange) is on disk.
-        if self.skip_cached:
-            if self._export_index is None:
-                self._export_index = self._build_export_index()
+        # The index is built once in run_all() before the worker pool starts
+        # to avoid race conditions / duplicate logs.
+        if self.skip_cached and self._export_index is not None:
             cache_key = (class_name, actual_tf, self.config.timerange)
             zip_path = self._export_index.get(cache_key)
             if zip_path is not None:
@@ -313,6 +314,7 @@ class BacktestRunner:
                         "timeframe": actual_tf,
                         "allowed_regimes": signal.allowed_regimes,
                         "exit_config": signal.exit_config,
+                        "_cached": True,
                     })
                     self.completed += 1
                     self.cache_hits += 1
@@ -517,6 +519,12 @@ class BacktestRunner:
         self.total = len(unique_tasks)
         self.completed = 0
 
+        # Build cache index once (before worker pool) so workers see a pre-populated
+        # _export_index without racing each other. Logged with the count so the
+        # user can see immediately how many strats will be served from cache.
+        if self.skip_cached and self._export_index is None:
+            self._export_index = self._build_export_index()
+
         # Print header
         filter_status = (
             "🔒 FILTRAGE ACTIF"
@@ -528,6 +536,11 @@ class BacktestRunner:
             print(
                 f"🚀 V3 - {self.total} backtests ({self.config.max_workers} workers) - {filter_status}"
             )
+            if self.skip_cached and self._export_index is not None:
+                print(
+                    f"⚡ Export cache : {len(self._export_index)} (class, tf) entrées indexées "
+                    f"pour timerange={self.config.timerange}"
+                )
             print(f"{'=' * 100}\n")
 
         # Run in parallel
@@ -579,13 +592,19 @@ class BacktestRunner:
             wr_part = f"WR={r['win_rate']:5.1f}%(L:{long_wr:>3.0f}%/S:{short_wr:>3.0f}%)"
             dd_dur = r.get("dd_duration_days", 0) or 0
             dd_part = f"DD={r['max_dd_pct']:5.1f}%({dd_dur:>3.0f}d)"
+            mkt = r.get("market_change_pct", 0) or 0
+            mkt_part = f"MKT={mkt:+6.1f}%"
+
+            # ⚡ prefix on cache hits (no freqtrade subprocess), ▶ on fresh runs
+            tag = "⚡" if r.get("_cached") else "▶"
 
             print(
-                f"  [{self.completed:3d}/{self.total}] "
+                f"  {tag} [{self.completed:3d}/{self.total}] "
                 f"{r['signal']:<35} {r['pair']:<18} {r['timeframe']:<4} │ "
                 f"Tr={r['trades']:>4d} {ls_part} "
                 f"{wr_part} "
                 f"PnL={r['profit_pct']:+6.1f}% "
+                f"{mkt_part} "
                 f"{dd_part} "
                 f"Sharpe={r['sharpe']:+5.2f}"
             )
