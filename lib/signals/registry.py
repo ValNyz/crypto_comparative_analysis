@@ -227,6 +227,17 @@ def expand_signal_template(
             # Build name from template
             name = _format_name(name_template, combo_params, exit_config)
 
+            # Auto-disambiguate: when SL / ROI / exit_config are in the sweep
+            # but not referenced in the name template, the resulting strategy
+            # class names collide and only the last variant survives in the
+            # strategies dir. Append a compact suffix per swept dimension.
+            name = _disambiguate_name(
+                name, name_template,
+                stoploss, len(stoploss_list),
+                roi, len(roi_list),
+                exit_config, len(exit_list),
+            )
+
             # Create signal config
             signal = SignalConfig(
                 name=name,
@@ -264,6 +275,65 @@ def expand_signal_template(
         signals.append(signal)
 
     return signals
+
+
+def _short_exit_name(exit_config: str) -> str:
+    """Short, unique-friendly suffix for an exit_config name.
+
+    Strips common prefixes (`trailing_roi_` → `tr_`, `zscore_roi_` → `zr_`,
+    `atr_roi_` → `ar_`) so names stay readable without colliding (the previous
+    `[:8]` slice mapped both `trailing_roi_fixed` and `trailing_roi_2_1` to
+    `trailing`, breaking disambiguation).
+    """
+    if not exit_config or exit_config == "none":
+        return "none"
+    s = (exit_config
+         .replace("trailing_roi_", "tr_")
+         .replace("zscore_roi_", "zr_")
+         .replace("atr_roi_", "ar_")
+         .replace("regime_roi_", "rr_")
+         .replace("partial_exit_", "pe_"))
+    return s[:12]
+
+
+def _disambiguate_name(
+    name: str,
+    name_template: str,
+    stoploss: float,
+    n_stoploss: int,
+    roi: Any,
+    n_roi: int,
+    exit_config: str,
+    n_exit: int,
+) -> str:
+    """Append disambiguation suffix when SL/ROI/exit sweeps aren't in the name template.
+
+    Without this, a sweep like `stoploss: [-0.03, -0.05, -0.10]` collapses to a
+    single class name (because the template doesn't include `{stoploss}`), so
+    the generated .py files overwrite each other and only the last variant is
+    backtested. We append `_sl{N}` / `_r{N}` / `_x{name}` only for swept dims
+    that the user didn't already encode in the template.
+    """
+    suffixes: List[str] = []
+
+    if n_stoploss > 1 and "{stoploss}" not in name_template:
+        sl_pct = int(round(abs(float(stoploss)) * 100))
+        suffixes.append(f"sl{sl_pct}")
+
+    if n_roi > 1 and "{roi}" not in name_template:
+        if isinstance(roi, dict) and roi:
+            first_roi = next(iter(roi.values()))
+            roi_pct = int(round(float(first_roi) * 100))
+        else:
+            roi_pct = int(round(float(roi) * 100))
+        suffixes.append(f"r{roi_pct}")
+
+    if n_exit > 1 and "{exit_config}" not in name_template:
+        suffixes.append(f"x{_short_exit_name(exit_config)}")
+
+    if suffixes:
+        return f"{name}_{'_'.join(suffixes)}"
+    return name
 
 
 def _ensure_list(value: Any) -> List:

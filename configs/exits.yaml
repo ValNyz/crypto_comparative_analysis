@@ -311,6 +311,12 @@ exits:
     trail_activate_pct: 0.015
     trail_distance_pct: 0.010
 
+  # Design 4 — tr_200_100 mode (arm at +2%, 1% giveback — framework top performer)
+  trailing_roi_2_1:
+    use_trailing_roi: true
+    trail_activate_pct: 0.020
+    trail_distance_pct: 0.010
+
   # Design 5 — Partial exit: take 50% at +1%
   partial_exit_50_at1:
     use_partial_exit: true
