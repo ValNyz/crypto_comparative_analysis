@@ -79,11 +79,11 @@ class BacktestRunner:
         self.export_dir = Path(config.freqtrade_path) / "user_data/backtest_results"
         self.export_dir.mkdir(parents=True, exist_ok=True)
 
-        # Cache index: built lazily (only when --skip-cached is on) to avoid
-        # paying for the meta.json scan when not needed. Keyed by (class_name,
-        # timeframe, timerange) → zip path. Cf. _build_export_index docstring
-        # for invalidation rules.
-        self.skip_cached: bool = bool(getattr(config, "skip_cached", False))
+        # Cache index: built once in run_all (only when --use-cache is on) to
+        # avoid paying for the meta.json scan when not needed. Keyed by
+        # (class_name, timeframe, timerange) → zip path. Cf.
+        # _build_export_index docstring for invalidation rules.
+        self.use_cache: bool = bool(getattr(config, "use_cache", False))
         self._export_index: Optional[Dict[Tuple[str, str, str], Path]] = None
         self.cache_hits: int = 0
 
@@ -300,7 +300,7 @@ class BacktestRunner:
         # for the same (class_name, tf, timerange) is on disk.
         # The index is built once in run_all() before the worker pool starts
         # to avoid race conditions / duplicate logs.
-        if self.skip_cached and self._export_index is not None:
+        if self.use_cache and self._export_index is not None:
             cache_key = (class_name, actual_tf, self.config.timerange)
             zip_path = self._export_index.get(cache_key)
             if zip_path is not None:
@@ -522,7 +522,7 @@ class BacktestRunner:
         # Build cache index once (before worker pool) so workers see a pre-populated
         # _export_index without racing each other. Logged with the count so the
         # user can see immediately how many strats will be served from cache.
-        if self.skip_cached and self._export_index is None:
+        if self.use_cache and self._export_index is None:
             self._export_index = self._build_export_index()
 
         # Print header
@@ -536,7 +536,7 @@ class BacktestRunner:
             print(
                 f"🚀 V3 - {self.total} backtests ({self.config.max_workers} workers) - {filter_status}"
             )
-            if self.skip_cached and self._export_index is not None:
+            if self.use_cache and self._export_index is not None:
                 print(
                     f"⚡ Export cache : {len(self._export_index)} (class, tf) entrées indexées "
                     f"pour timerange={self.config.timerange}"

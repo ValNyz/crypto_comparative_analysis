@@ -171,13 +171,14 @@ Examples:
         "--debug", "-d", action="store_true", help="Enable debug output"
     )
     parser.add_argument(
-        "--skip-cached",
+        "--refresh",
         action="store_true",
         help=(
-            "Skip backtests whose strategy class already has a matching "
-            "export in user_data/backtest_results/ (same class_name + "
-            "timeframe + timerange). Useful to resume a large grid after "
-            "a crash."
+            "Force a full re-run via freqtrade, bypassing cached backtest "
+            "results. By default, the runner reuses any matching export in "
+            "user_data/backtest_results/ (class_name + timeframe + timerange "
+            "match). Pass --refresh when you've changed strategy code or "
+            "data and need fresh results."
         ),
     )
     parser.add_argument(
@@ -207,7 +208,7 @@ def main():
     # Apply CLI overrides
     config.max_workers = args.workers
     config.debug = args.debug
-    config.skip_cached = args.skip_cached
+    config.use_cache = not args.refresh
     config.enable_regime_filter = args.enable_filter
     config.regime_lookback = args.regime_lookback
     config.regime_adx_threshold = args.adx_threshold

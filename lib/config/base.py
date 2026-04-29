@@ -47,11 +47,12 @@ class Config:
     # Feature flags
     enable_regime_filter: bool = False
     debug: bool = False
-    # Skip backtests whose strategy class already has an export in
-    # user_data/backtest_results/ (matched on class_name + timeframe +
-    # timerange). Useful to resume large grids after a crash without
-    # re-running already-completed strats.
-    skip_cached: bool = False
+    # Reuse already-computed backtest results (parsed from
+    # user_data/backtest_results/*.zip) instead of running freqtrade for
+    # strategies whose class_name + timeframe + timerange match a previous
+    # export. ON by default so re-running a partially-completed grid is
+    # fast; pass --refresh to force a full re-run from freqtrade.
+    use_cache: bool = True
 
     def __post_init__(self):
         """Ensure directories exist."""
