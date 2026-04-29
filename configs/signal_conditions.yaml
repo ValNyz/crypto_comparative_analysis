@@ -34,3 +34,38 @@ conditions:
   # Price action
   is_green: "dataframe['is_green']"
   is_red: "dataframe['is_red']"
+
+  # === P1 / P2: extended indicators (require base.py INDICATORS_BLOCK) ===
+  # Ichimoku Kumo cross
+  kumo_bull_cross: "(dataframe['close'] > dataframe['kumo_top']) & (dataframe['close'].shift(1) <= dataframe['kumo_top'].shift(1))"
+  kumo_bear_cross: "(dataframe['close'] < dataframe['kumo_bottom']) & (dataframe['close'].shift(1) >= dataframe['kumo_bottom'].shift(1))"
+  kumo_above: "dataframe['close'] > dataframe['kumo_top']"
+  kumo_below: "dataframe['close'] < dataframe['kumo_bottom']"
+
+  # VWAP intraday z-score (mean-reversion)
+  vwap_oversold: "dataframe['vwap_zscore'] < -2.0"
+  vwap_overbought: "dataframe['vwap_zscore'] > 2.0"
+
+  # BBW squeeze (volatility compression — non-directional gate)
+  bbw_squeeze: "dataframe['bbw_pct'] < 0.15"
+
+  # Volume zscore (statistical spike)
+  volume_zspike: "dataframe['volume_zscore'] > 2.5"
+
+  # Volume + return climax (capitulation patterns — directional)
+  bull_climax: "(dataframe['volume_ratio'] > 2.5) & (dataframe['ret_1d'] > dataframe['ret_1d'].rolling(24).quantile(0.95))"
+  bear_climax: "(dataframe['volume_ratio'] > 2.5) & (dataframe['ret_1d'] < dataframe['ret_1d'].rolling(24).quantile(0.05))"
+
+  # Trend weakening (rebound point on overextended trends)
+  trend_decay_long:  "(dataframe['trend_strength_c'] < -1) & (dataframe['trend_strength_chg'] > 0.3)"
+  trend_decay_short: "(dataframe['trend_strength_c'] > 1)  & (dataframe['trend_strength_chg'] < -0.3)"
+
+  # === Cross-coin (require cross_coin_block — see _needs_cross_coin_block in generator) ===
+  ratio_btc_low:  "dataframe['ratio_btc_zscore'] < -2.0"
+  ratio_btc_high: "dataframe['ratio_btc_zscore'] > 2.0"
+  ratio_btc_breakout_up:   "dataframe['ratio_btc'] > dataframe['ratio_btc_high_break']"
+  ratio_btc_breakout_down: "dataframe['ratio_btc'] < dataframe['ratio_btc_low_break']"
+  ratio_eth_low:  "dataframe['ratio_eth_zscore'] < -2.0"
+  ratio_eth_high: "dataframe['ratio_eth_zscore'] > 2.0"
+  ratio_eth_breakout_up:   "dataframe['ratio_eth'] > dataframe['ratio_eth_high_break']"
+  ratio_eth_breakout_down: "dataframe['ratio_eth'] < dataframe['ratio_eth_low_break']"
