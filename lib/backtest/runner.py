@@ -21,7 +21,7 @@ import numpy as np
 from ..signals.base import SignalConfig
 from ..generation.generator import StrategyGenerator
 from ..utils.logging import print_lock
-from ..utils.colors import color_sharpe, color_dd, color_pvalue, color_pnl_composite
+from ..utils.colors import color_calmar, color_dd, color_pvalue, color_pnl_composite
 from ..utils.helpers import short_pair, sanitize_class_name
 from ..null_pool import (
     compute_cache_key,
@@ -1322,7 +1322,7 @@ class BacktestRunner:
                 f"{r['signal']:<35} {short_pair(r['pair']):<6} {r['timeframe']:<4} │ "
                 f"Tr={total_tr:>4d} ({long_n:>3d}L/{short_n:>3d}S) "
                 f"PnL={r['profit_pct']:+6.1f}% "
-                f"SH={r['sharpe']:+5.2f} │ "
+                f"CAL={r.get('calmar', 0) or 0:+6.2f} │ "
                 f"p={pv_str}{marker} (adj={adj_str})"
             )
 
@@ -1415,8 +1415,11 @@ class BacktestRunner:
                 pv_colored = color_pvalue(pv, f"{pv:.3f}")
                 p_part = f" p={pv_colored}{sig_marker}"
 
-            # Color Sharpe: >=2 bold green, >=1 green.
-            sharpe_colored = color_sharpe(r['sharpe'], f"{r['sharpe']:+5.2f}")
+            # Color Calmar: >=3 bold green, >=1 green. Replaces Sharpe in
+            # the live line — under fixed stake / idle capital, Sharpe is
+            # diluted but Calmar (annualized return / max DD) stays meaningful.
+            calmar_val = r.get("calmar", 0) or 0
+            calmar_colored = color_calmar(calmar_val, f"{calmar_val:+6.2f}")
 
             print(
                 f"  {tag} [{self.completed:3d}/{self.total}] "
@@ -1426,7 +1429,7 @@ class BacktestRunner:
                 f"{pnl_part} "
                 f"{mkt_part} "
                 f"{dd_part} "
-                f"SH={sharpe_colored}"
+                f"CAL={calmar_colored}"
                 f"{p_part}"
             )
 

@@ -64,7 +64,9 @@ def print_winners(df: pd.DataFrame, top_n: int = 50, min_trades: int = RANK_MIN_
         )
 
         tier1 = df_f[(df_f["p_value_adj"].notna()) & (df_f["p_value_adj"] < 0.05)]
-        tier1 = tier1.sort_values(["p_value_adj", "sharpe"], ascending=[True, False])
+        # Tiebreak by Calmar (risk-adjusted return) instead of Sharpe — under
+        # fixed stake, Sharpe is diluted by idle capital but Calmar stays valid.
+        tier1 = tier1.sort_values(["p_value_adj", "calmar"], ascending=[True, False])
         tier1 = _dedup_with_count(tier1, total_var)
 
         tier2 = df_f[
@@ -72,7 +74,7 @@ def print_winners(df: pd.DataFrame, top_n: int = 50, min_trades: int = RANK_MIN_
             & (df_f["p_value"] < 0.10)
             & ((df_f["p_value_adj"].isna()) | (df_f["p_value_adj"] >= 0.05))
         ]
-        tier2 = tier2.sort_values(["p_value", "sharpe"], ascending=[True, False])
+        tier2 = tier2.sort_values(["p_value", "calmar"], ascending=[True, False])
         tier2 = _dedup_with_count(tier2, total_var)
 
         if len(tier1) > 0:
@@ -251,7 +253,9 @@ def _print_temporal_robustness(df: pd.DataFrame, top_n: int = 50):
     ].copy()
     if len(df_t) == 0:
         return
-    df_t["robust_score"] = df_t["consistency"].astype(float) * df_t["sharpe"]
+    # Score = consistency × Calmar (risk-adjusted return matters more than
+    # raw Sharpe under fixed stake; multiplied by mois-profitables ratio).
+    df_t["robust_score"] = df_t["consistency"].astype(float) * df_t["calmar"]
     df_t = df_t.sort_values("robust_score", ascending=False)
     # Dedup display: collapse TF + exit siblings, keep best robust_score
     if "signal_root" in df_t.columns:
@@ -265,7 +269,7 @@ def _print_temporal_robustness(df: pd.DataFrame, top_n: int = 50):
     )
     print(
         f"\n  {'#':<3} {'Signal':<30} {'Pair':<6} {'TF':<4} │ "
-        f"{'Sharpe':<7} {'Cons%':<6} {'Mois+':<6} {'PnL%':<7} "
+        f"{'Calmar':<7} {'Cons%':<6} {'Mois+':<6} {'PnL%':<7} "
         f"{'μ_m':<6} {'σ_m':<6} "
         f"{'p':<6} {'p_adj':<6} {'q':<6} {'Score':<7}"
     )
@@ -285,10 +289,11 @@ def _print_temporal_robustness(df: pd.DataFrame, top_n: int = 50):
         q_s = f"{qv:.3f}" if qv is not None and not pd.isna(qv) else " n/a "
         mu_m = r.get("avg_month", 0) or 0
         sd_m = r.get("std_month", 0) or 0
+        cal = r.get("calmar", 0) or 0
         print(
             f"  {i:<3} {r['signal']:<30} {short_pair(r['pair']):<6} "
             f"{r['timeframe']:<4} │ "
-            f"{r['sharpe']:<+7.2f} {cons:<6.0f} {mois:<6} "
+            f"{cal:<+7.2f} {cons:<6.0f} {mois:<6} "
             f"{r['profit_pct']:<+7.1f} {mu_m:<+6.1f} {sd_m:<6.1f} "
             f"{r['p_value']:<6.3f} {adj_s:<6} {q_s:<6} "
             f"{r['robust_score']:<7.1f}"
@@ -303,18 +308,18 @@ def _print_block(rows: pd.DataFrame, show_pvals: bool = True):
     if show_pvals:
         header = (
             f"\n  {'#':<3} {'Signal':<30} {'Pair':<6} {'TF':<4} {'Exit':<14} │ "
-            f"{'Tr':<4} {'PnL%':<7} {'Sharpe':<7} {'DD%':<5} {'Cons%':<5} "
+            f"{'Tr':<4} {'PnL%':<7} {'Calmar':<7} {'PF':<6} {'DD%':<5} {'Cons%':<5} "
             f"{'μ_m':<6} {'σ_m':<6} │ "
             f"{'p':<6} {'p_adj':<6} {'q':<6} {'n_var':<6}"
         )
-        sep_w = 158
+        sep_w = 165
     else:
         header = (
             f"\n  {'#':<3} {'Signal':<30} {'Pair':<6} {'TF':<4} {'Exit':<14} │ "
-            f"{'Tr':<4} {'PnL%':<7} {'Sharpe':<7} {'DD%':<5} {'Cons%':<5} "
+            f"{'Tr':<4} {'PnL%':<7} {'Calmar':<7} {'PF':<6} {'DD%':<5} {'Cons%':<5} "
             f"{'μ_m':<6} {'σ_m':<6}"
         )
-        sep_w = 124
+        sep_w = 131
 
     print(header)
     print("  " + "─" * sep_w)
@@ -326,11 +331,14 @@ def _print_block(rows: pd.DataFrame, show_pvals: bool = True):
         cons = r.get("consistency", 0) or 0
         mu_m = r.get("avg_month", 0) or 0
         sd_m = r.get("std_month", 0) or 0
+        cal = r.get("calmar", 0) or 0
+        pf = r.get("profit_factor", 0) or 0
+        pf_s = f"{pf:<6.2f}" if pf != float("inf") else "  inf"
         line = (
             f"  {i:<3} {r['signal']:<30} {short_pair(r['pair']):<6} "
             f"{r['timeframe']:<4} {str(exit_cfg)[:14]:<14} │ "
             f"{r['trades']:<4d} {r['profit_pct']:<+7.1f} "
-            f"{r['sharpe']:<+7.2f} {r['max_dd_pct']:<5.1f} {cons:<5.0f} "
+            f"{cal:<+7.2f} {pf_s} {r['max_dd_pct']:<5.1f} {cons:<5.0f} "
             f"{mu_m:<+6.1f} {sd_m:<6.1f}"
         )
         if show_pvals:

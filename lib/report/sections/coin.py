@@ -48,19 +48,19 @@ def print_per_coin_summary(df: pd.DataFrame, top_n: int = 5):
         )
         print(f"{'─' * 110}")
 
-        # Top N par Sharpe pour cette paire — dedup TF + exit siblings.
+        # Top N par Calmar pour cette paire — dedup TF + exit siblings.
         # pair est déjà fixé par la boucle, donc dedup par signal_root seul.
         pair_df_disp = dedup_for_display(
-            pair_df, sort_cols="sharpe", keys=("signal_root",)
+            pair_df, sort_cols="calmar", keys=("signal_root",)
         )
-        top = pair_df_disp.nlargest(min(top_n, len(pair_df_disp)), "sharpe")
+        top = pair_df_disp.nlargest(min(top_n, len(pair_df_disp)), "calmar")
 
         print(
             f"\n  {'#':<3} {'Signal':<30} {'TF':<4} │ "
-            f"{'Tr':<4} {'WR%':<6} {'PnL%':<8} {'Sharpe':<7} "
+            f"{'Tr':<4} {'WR%':<6} {'PnL%':<8} {'Calmar':<7} {'PF':<6} "
             f"{'μ_m':<6} {'σ_m':<6} │ {'Exit':<12}"
         )
-        print("  " + "─" * 109)
+        print("  " + "─" * 116)
 
         for i, (_, r) in enumerate(top.iterrows(), 1):
             exit_cfg = r.get("exit_config", "none")
@@ -68,10 +68,13 @@ def print_per_coin_summary(df: pd.DataFrame, top_n: int = 5):
                 exit_cfg = "none"
             mu_m = r.get("avg_month", 0) or 0
             sd_m = r.get("std_month", 0) or 0
+            cal = r.get("calmar", 0) or 0
+            pf = r.get("profit_factor", 0) or 0
+            pf_s = f"{pf:<6.2f}" if pf != float("inf") else "  inf"
             print(
                 f"  {i:<3} {r['signal']:<30} {r['timeframe']:<4} │ "
                 f"{r['trades']:<4} {r['win_rate']:<6.1f} {r['profit_pct']:<+8.1f} "
-                f"{r['sharpe']:<+7.2f} {mu_m:<+6.1f} {sd_m:<6.1f} │ {exit_cfg:<12}"
+                f"{cal:<+7.2f} {pf_s} {mu_m:<+6.1f} {sd_m:<6.1f} │ {exit_cfg:<12}"
             )
 
 

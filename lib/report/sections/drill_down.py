@@ -113,10 +113,13 @@ def _print_one_drill(
         f"\n  [{idx:>2}] {sig_name}  ({pair}, {tf}, {exit_cfg})"
         f"   p={pv_s}  p_adj={pv_adj_s}*"
     )
+    pf = r.get("profit_factor", 0) or 0
+    pf_s = f"{pf:.2f}" if pf != float("inf") else "inf"
     print(
         f"       Tr={int(r.get('trades', 0)):d}  "
         f"PnL={r.get('profit_pct', 0):+.1f}%  "
-        f"Sharpe={r.get('sharpe', 0):+.2f}  "
+        f"Calmar={r.get('calmar', 0) or 0:+.2f}  "
+        f"PF={pf_s}  "
         f"DD={r.get('max_dd_pct', 0):.1f}% ({int(r.get('dd_duration_days', 0) or 0)}d)  "
         f"WR={r.get('win_rate', 0):.1f}%  "
         f"MKT={r.get('market_change_pct', 0):+.1f}%"

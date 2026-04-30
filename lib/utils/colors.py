@@ -49,6 +49,23 @@ def color_sharpe(value, formatted: str) -> str:
     return formatted
 
 
+def color_calmar(value, formatted: str) -> str:
+    """Calmar ≥ 3 → bold green, ≥ 1.5 → green, else neutral.
+
+    Calmar = annualized_return / max_drawdown — risk-adjusted return that
+    survives constant-stake setups (where Sharpe is dampened by idle capital).
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return formatted
+    if v >= 3.0:
+        return _wrap(formatted, "bold green")
+    if v >= 1.5:
+        return _wrap(formatted, "green")
+    return formatted
+
+
 def color_dd(value, formatted: str) -> str:
     """DD < 5% → bold green, < 10% → green, else neutral. Lower is better."""
     try:
