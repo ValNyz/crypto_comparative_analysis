@@ -120,6 +120,73 @@ class BacktestRunner:
         # acquire, negligible vs subprocess time.
         self._counter_lock = threading.Lock()
 
+        # Memoize expected timerange per (pair, tf). Computing it requires
+        # opening the pair's feather to read its date min/max, ~50ms each ;
+        # we do it once per (pair, tf) and serve from cache thereafter.
+        self._expected_tr_cache: Dict[Tuple[str, str], str] = {}
+
+    @staticmethod
+    def _parse_timerange(tr: str) -> Tuple[Optional[str], Optional[str]]:
+        """Split 'YYYYMMDD-YYYYMMDD' (with optionally-empty bounds) into a
+        (start, end) pair. Empty bound → None (open-ended on that side).
+        """
+        if "-" not in (tr or ""):
+            return None, None
+        parts = (tr or "").split("-", 1)
+        return (parts[0].strip() or None, parts[1].strip() or None)
+
+    def _expected_timerange(self, pair: str, tf: str) -> str:
+        """Predict the YYYYMMDD-YYYYMMDD freqtrade will stamp for this (pair, tf).
+
+        Freqtrade clips `--timerange` to actual data bounds in the feather:
+            effective_start = max(config_start, data_start)
+            effective_end   = min(config_end,   data_end)
+        We compute the same thing here so cache keys match what freqtrade
+        wrote in past meta.json files. Without this, the cached_range varies
+        per (pair, tf) (data ends at different days) and strict equality
+        against `config.timerange` always fails.
+
+        Falls back to `config.timerange` when the feather can't be located —
+        better to miss cache than to pretend we know.
+        """
+        ck = (pair, tf)
+        cached = self._expected_tr_cache.get(ck)
+        if cached is not None:
+            return cached
+
+        from datetime import datetime, timezone
+        safe_pair = pair.replace("/", "_").replace(":", "_")
+        candidates = [
+            Path(self.config.data_dir) / "futures" / f"{safe_pair}-{tf}-futures.feather",
+            Path(self.config.data_dir) / "futures" / f"{safe_pair}-{tf}.feather",
+            Path(self.config.data_dir) / f"{safe_pair}-{tf}-futures.feather",
+            Path(self.config.data_dir) / f"{safe_pair}-{tf}.feather",
+        ]
+        feather = next((p for p in candidates if p.exists()), None)
+        result = self.config.timerange
+        if feather is not None:
+            try:
+                df = pd.read_feather(feather, columns=["date"])
+                df["date"] = pd.to_datetime(df["date"], utc=True)
+                data_start = df["date"].min()
+                data_end = df["date"].max()
+                cfg_start, cfg_end = self._parse_timerange(self.config.timerange)
+                if cfg_start:
+                    cfg_start_dt = datetime.strptime(cfg_start, "%Y%m%d").replace(tzinfo=timezone.utc)
+                    eff_start = max(cfg_start_dt, data_start)
+                else:
+                    eff_start = data_start
+                if cfg_end:
+                    cfg_end_dt = datetime.strptime(cfg_end, "%Y%m%d").replace(tzinfo=timezone.utc)
+                    eff_end = min(cfg_end_dt, data_end)
+                else:
+                    eff_end = data_end
+                result = f"{eff_start.strftime('%Y%m%d')}-{eff_end.strftime('%Y%m%d')}"
+            except Exception:
+                pass
+        self._expected_tr_cache[ck] = result
+        return result
+
     def _bump_completed(self) -> int:
         """Atomically increment self.completed and return the new value.
 
@@ -147,7 +214,6 @@ class BacktestRunner:
         don't invalidate — bump cache via `--refresh` if needed.
         """
         index: Dict[Tuple[str, str, str, str], Path] = {}
-        timerange = self.config.timerange
         for meta_path in self.export_dir.glob("*.meta.json"):
             try:
                 meta = json.loads(meta_path.read_text())
@@ -165,7 +231,6 @@ class BacktestRunner:
                 start_ts = info.get("backtest_start_ts")
                 end_ts = info.get("backtest_end_ts")
                 if start_ts and end_ts:
-                    # Some exports have ms, some seconds. Normalize.
                     if start_ts > 10**11:  # ms
                         start_ts = start_ts / 1000
                         end_ts = end_ts / 1000
@@ -175,16 +240,18 @@ class BacktestRunner:
                     cached_range = f"{start_str}-{end_str}"
                 else:
                     cached_range = ""
-                # Only index if the timerange matches the current run's
-                if cached_range and cached_range != timerange:
-                    continue
                 pair = self._extract_pair_from_zip(zip_path, class_name)
                 if pair is None:
-                    # Can't disambiguate which pair this zip belongs to — skip
-                    # rather than risk a wrong cache hit. The strat will simply
-                    # re-run.
                     continue
-                index[(class_name, tf, timerange, pair)] = zip_path
+                # Compare cached_range to the EXPECTED range freqtrade would
+                # use for this (pair, tf) under the current config — that's
+                # config.timerange clipped to feather data bounds. Without
+                # this, cached zips with end shifted by data clipping never
+                # match config.timerange (closed) and the cache always misses.
+                expected = self._expected_timerange(pair, tf)
+                if cached_range and cached_range != expected:
+                    continue
+                index[(class_name, tf, expected, pair)] = zip_path
         return index
 
     def _extract_pair_from_zip(self, zip_path: Path, class_name: str) -> Optional[str]:
@@ -380,13 +447,14 @@ class BacktestRunner:
         class_name, strategy_path = self.generator.generate(signal, timeframe)
         actual_tf = signal.timeframe_override or timeframe
 
-        # Cache hit check — skip freqtrade entirely if a previous export
-        # for the same (class_name, tf, timerange, pair) is on disk.
-        # Pair MUST be in the key: per-pair zips share class_name + tf and
-        # would otherwise collide silently (returning one pair's results
-        # mislabeled as another's).
+        # Cache hit check — skip freqtrade entirely if a previous export for
+        # the same (class_name, tf, expected_range, pair) is on disk. The
+        # expected_range is what freqtrade WILL stamp for this (pair, tf)
+        # given config.timerange clipped to feather data bounds — same value
+        # used by `_build_export_index`, so strict equality matches.
         if self.use_cache and self._export_index is not None:
-            cache_key = (class_name, actual_tf, self.config.timerange, pair)
+            expected_tr = self._expected_timerange(pair, actual_tf)
+            cache_key = (class_name, actual_tf, expected_tr, pair)
             zip_path = self._export_index.get(cache_key)
             if zip_path is not None:
                 cached = self._load_cached_result(class_name, zip_path)
