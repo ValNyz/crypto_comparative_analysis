@@ -187,9 +187,6 @@ def print_signal_regime_matrix(df: pd.DataFrame):
     # Detailed matrices
     _print_detailed_matrices(matrix_summary)
 
-    # Polyvalent signals
-    _print_polyvalent_from_matrix(matrix_summary)
-
 
 def _build_matrix_summary(df: pd.DataFrame) -> List[Dict]:
     """Build matrix summary from DataFrame."""
@@ -291,94 +288,3 @@ def _print_detailed_matrices(matrix_summary: List[Dict]):
         print("".join(parts))
 
 
-def _print_polyvalent_from_matrix(matrix_summary: List[Dict]):
-    """Print polyvalent signals from matrix summary."""
-    print_header("🌐 SIGNAUX POLYVALENTS (performants dans plusieurs régimes)")
-    print()
-
-    polyvalent = []
-    for row in matrix_summary:
-        long_pnls = []
-        short_pnls = []
-        long_regimes = []
-        short_regimes = []
-
-        for regime in ["bull", "bear", "range", "volatile"]:
-            long_pnl = row.get(f"{regime}_long_pnl")
-            long_n = row.get(f"{regime}_long_n", 0)
-            short_pnl = row.get(f"{regime}_short_pnl")
-            short_n = row.get(f"{regime}_short_n", 0)
-
-            if long_pnl is not None and long_n >= 1:
-                long_pnls.append(long_pnl)
-                long_regimes.append(regime)
-
-            if short_pnl is not None and short_n >= 1:
-                short_pnls.append(short_pnl)
-                short_regimes.append(regime)
-
-        long_profitable = sum(1 for p in long_pnls if p > 0)
-        short_profitable = sum(1 for p in short_pnls if p > 0)
-
-        if (len(long_pnls) >= 2 and long_profitable >= 2) or (
-            len(short_pnls) >= 2 and short_profitable >= 2
-        ):
-            polyvalent.append(
-                {
-                    "signal": row["signal"],
-                    "sharpe": row["global_sharpe"],
-                    "long_avg_pnl": np.mean([p for p in long_pnls if p > 0])
-                    if long_profitable > 0
-                    else 0,
-                    "long_profitable": long_profitable,
-                    "long_total": len(long_pnls),
-                    "long_regimes": long_regimes,
-                    "short_avg_pnl": np.mean([p for p in short_pnls if p > 0])
-                    if short_profitable > 0
-                    else 0,
-                    "short_profitable": short_profitable,
-                    "short_total": len(short_pnls),
-                    "short_regimes": short_regimes,
-                }
-            )
-
-    if polyvalent:
-        polyvalent.sort(
-            key=lambda x: (
-                -(x["long_profitable"] + x["short_profitable"]),
-                -x["sharpe"],
-            )
-        )
-
-        print(
-            f"  {'Signal':<28} │ {'Sharpe':<7} │ {'LONG Prof/Tot':<14} │ "
-            f"{'Avg L%':<8} │ {'SHORT Prof/Tot':<14} │ {'Avg S%':<8}"
-        )
-        print("  " + "─" * 100)
-
-        for p in polyvalent[:15]:
-            long_info = f"{p['long_profitable']}/{p['long_total']}"
-            short_info = f"{p['short_profitable']}/{p['short_total']}"
-
-            print(
-                f"  {p['signal']:<28} │ {p['sharpe']:<+7.2f} │ 🟩{long_info:<12} │ "
-                f"{p['long_avg_pnl']:<+8.2f} │ 🟥{short_info:<12} │ {p['short_avg_pnl']:<+8.2f}"
-            )
-
-        print("\n  Détail régimes (Top 5):")
-        for p in polyvalent[:5]:
-            long_reg_str = (
-                ",".join([r[:2] for r in p["long_regimes"]])
-                if p["long_regimes"]
-                else "---"
-            )
-            short_reg_str = (
-                ",".join([r[:2] for r in p["short_regimes"]])
-                if p["short_regimes"]
-                else "---"
-            )
-            print(
-                f"    • {p['signal']:<28} │ Long: {long_reg_str:<15} │ Short: {short_reg_str}"
-            )
-    else:
-        print("  ⚠️  Aucun signal profitable dans au moins 2 régimes")

@@ -134,8 +134,10 @@ def _print_one_drill(
             _print_quarterly_table(quarterly_rows)
         else:
             _print_monthly_table_from_df(r)
+            _print_quarterly_fallback_from_df(r)
     else:
         _print_monthly_table_from_df(r)
+        _print_quarterly_fallback_from_df(r)
 
     # Per-regime sub-table from regime_stats dict
     _print_regime_table(r)
@@ -227,6 +229,32 @@ def _print_monthly_table_from_df(r: pd.Series) -> None:
         print(
             f"       M{j + 1:<5} {p:<+8.2f} {int(tr):<5d} "
             f"{pf:<6.2f} {wr:<6.1f}"
+        )
+
+
+def _print_quarterly_fallback_from_df(r: pd.Series) -> None:
+    """Aggregate monthly_profits / monthly_trades into 3-month buckets.
+
+    Used when no zip is available (no per-trade returns) — Sharpe can't be
+    computed honestly from 3 monthly aggregates so it's omitted. The PnL +
+    trade count per quarter still surfaces regime shifts (e.g., +30 USDC/Q
+    in 2024 then -10 in 2025 = clear drift).
+    """
+    profits = r.get("monthly_profits") or []
+    trades = r.get("monthly_trades") or []
+    if not profits or len(profits) < 3:
+        return
+    print(f"\n       {'Trim':<6} {'PnL':<8} {'Tr':<5} {'Mois+/3':<8}")
+    print("       " + "─" * 30)
+    for q_start in range(0, len(profits), 3):
+        q_idx = q_start // 3 + 1
+        q_profits = profits[q_start:q_start + 3]
+        q_trades = trades[q_start:q_start + 3] if q_start < len(trades) else []
+        pnl = sum(q_profits)
+        tr = sum(int(t) for t in q_trades)
+        n_pos = sum(1 for p in q_profits if p > 0)
+        print(
+            f"       Q{q_idx:<5} {pnl:<+8.2f} {tr:<5d} {n_pos}/{len(q_profits):<6}"
         )
 
 
