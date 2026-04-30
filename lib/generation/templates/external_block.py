@@ -13,7 +13,13 @@ EXTERNAL_LOADERS_BLOCK = '''
     EXTERNAL_DATA_DIR = Path("{external_data_dir}")
 
     def _load_external_parquet(self, fname: str) -> pd.DataFrame:
-        """Read parquet from EXTERNAL_DATA_DIR. Returns empty df if absent/unreadable."""
+        """Read parquet from EXTERNAL_DATA_DIR. Returns empty df if absent/unreadable.
+
+        Normalizes timestamp precision via pd.to_datetime — recent parquet
+        writers (PyArrow >= 8) default to datetime64[us, UTC] while freqtrade
+        OHLCV is datetime64[ns, UTC], and merge_asof rejects mismatched
+        precision. pd.to_datetime returns ns precision regardless of input.
+        """
         path = self.EXTERNAL_DATA_DIR / fname
         if not path.exists():
             return pd.DataFrame()
@@ -23,10 +29,7 @@ EXTERNAL_LOADERS_BLOCK = '''
             return pd.DataFrame()
         if df.empty or "timestamp" not in df.columns:
             return pd.DataFrame()
-        if df["timestamp"].dt.tz is None:
-            df["timestamp"] = df["timestamp"].dt.tz_localize("UTC")
-        else:
-            df["timestamp"] = df["timestamp"].dt.tz_convert("UTC")
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
         return df.sort_values("timestamp").reset_index(drop=True)
 
     def _align_to_dataframe_tz(self, df: pd.DataFrame, reference_df: pd.DataFrame) -> pd.DataFrame:
