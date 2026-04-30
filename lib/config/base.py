@@ -36,11 +36,11 @@ class Config:
 
     # Wallet/Position
     dry_run_wallet: float = 1000
-    # Stake per trade. "unlimited" = 100% of available balance per entry.
-    # Combined with max_open_trades=1 this means each trade uses the full
-    # wallet (no fractional staking) — desired so portfolio PnL reflects
-    # the strategy's per-trade returns directly without 10× compression.
-    stake_amount: Union[float, str] = "unlimited"
+    # Fixed stake per trade (was "unlimited"). 100 USDC matches the
+    # null-pool baseline so per-trade profit_ratio is directly comparable
+    # across observed and pool runs. With wallet=1000 + max_open_trades=1,
+    # this exposes 10% of capital per trade.
+    stake_amount: Union[float, str] = 100
     max_open_trades: int = 1
 
     # Regime detection parameters
@@ -69,13 +69,12 @@ class Config:
     # `--refresh-null-pool` explicitly to rebuild.
     enable_null_pool: bool = True
     null_pool_seed: int = 42
-    null_pool_target_trades: int = 2000  # entries emitted per pool run
+    null_pool_target_trades: int = 1000  # entries emitted per pool run
     null_pool_n_bootstrap: int = 1000
-    # Equity fraction per trade in bootstrap. 1.0 matches our normal setup
-    # (stake=unlimited + max_open_trades=1 → each trade compounds at 100%
-    # of wallet). Lower it (e.g. 0.10) only if comparing strategies that
-    # used fractional staking.
-    null_pool_capital_pct: float = 1.0
+    # Equity fraction per trade in bootstrap. 0.10 matches stake=100 +
+    # wallet=1000 (10% of capital per trade) so the bootstrap simulates
+    # the same compounding as observed strategies.
+    null_pool_capital_pct: float = 0.10
     null_pool_block_len: float = 5.0  # mean block length for stationary bootstrap
     refresh_null_pool: bool = False  # force re-build of parquet pool cache
 

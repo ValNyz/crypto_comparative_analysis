@@ -73,14 +73,24 @@ def save_pool(df: pd.DataFrame, cache_key: str, cache_dir: Path) -> Path:
 
 
 def extract_trades_from_zip(
-    zip_path: Path, class_name: str
+    zip_path: Path, class_name: str, log=None
 ) -> Optional[pd.DataFrame]:
     """Parse the inner backtest JSON from a freqtrade export zip.
 
-    Returns a DataFrame with the columns we use for bootstrapping
-    (profit_ratio, open_date, close_date, is_short, exit_reason). None
-    on parse error or if the strategy name isn't present.
+    Returns a DataFrame with bootstrap-relevant columns (profit_ratio,
+    open_date, close_date, is_short, exit_reason). Returns None on parse
+    error or if the strategy/trades aren't present.
+
+    `log` is an optional callable(msg) for failure diagnostics — pass the
+    runner's `_phase1_log` to coordinate with the tqdm bar so messages
+    don't break the rendered bar. When None, falls back to print().
     """
+    def _log(msg: str) -> None:
+        if log is not None:
+            log(msg)
+        else:
+            print(msg)
+
     try:
         with zipfile.ZipFile(zip_path) as z:
             inner_name = next(
@@ -92,13 +102,27 @@ def extract_trades_from_zip(
                 None,
             )
             if not inner_name:
+                _log(f"    extract: no inner JSON in {zip_path.name}")
                 return None
             data = json.loads(z.read(inner_name))
-        strat = data.get("strategy", {}).get(class_name, {})
+        strategies = data.get("strategy", {}) or {}
+        if class_name not in strategies:
+            _log(
+                f"    extract: class '{class_name}' not in {zip_path.name}; "
+                f"available: {list(strategies.keys())[:5]}"
+            )
+            return None
+        strat = strategies[class_name]
         trades = strat.get("trades", [])
         if not trades:
+            tot = strat.get("total_trades", "?")
+            _log(
+                f"    extract: trades=[] for {class_name} (total_trades={tot}) "
+                f"in {zip_path.name} — freqtrade ran but produced no per-trade data"
+            )
             return None
-    except Exception:
+    except Exception as e:
+        _log(f"    extract: exception on {zip_path.name}: {type(e).__name__}: {e}")
         return None
 
     df = pd.DataFrame(trades)
@@ -106,8 +130,12 @@ def extract_trades_from_zip(
     available = [c for c in keep if c in df.columns]
     if "profit_ratio" not in available:
         # Without profit_ratio there's nothing to bootstrap on.
+        _log(
+            f"    extract: no profit_ratio col for {class_name}; "
+            f"got {list(df.columns)[:8]}"
+        )
         return None
-    out = df[available].copy()
+    out = pd.DataFrame(df[available]).copy()
     # Normalize dates for time-aware sorting in the bootstrap layer.
     if "open_date" in out.columns:
         out["open_date"] = pd.to_datetime(out["open_date"], utc=True, errors="coerce")

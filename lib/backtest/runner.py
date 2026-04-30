@@ -105,6 +105,10 @@ class BacktestRunner:
         self._live_pool_cache: Dict[str, Optional[pd.DataFrame]] = {}
         self._live_pool_lock = threading.Lock()
 
+        # tqdm bar for Phase 1 (set in _build_null_pools_phase). Workers route
+        # diagnostic logs through `_phase1_log()` so prints don't drown the bar.
+        self._phase1_pbar = None
+
     def _get_export_name(self, signal: SignalConfig, pair: str, timeframe: str) -> str:
         """Génère un nom de fichier unique pour l'export."""
         safe_pair = pair.replace("/", "_").replace(":", "_")
@@ -370,24 +374,37 @@ class BacktestRunner:
         cmd += [
             "--datadir",
             self.config.data_dir,
+            # Pool runs override wallet to 10000 so 20 parallel trades at
+            # stake=100 each can fit (20 × 100 = 2000 < 10000 with margin).
             "--dry-run-wallet",
-            str(self.config.dry_run_wallet),
+            str(10000.0 if signal.signal_type == "random_baseline" else self.config.dry_run_wallet),
+            # Fixed stake (not "unlimited") so every trade exposes the same
+            # capital — profit_ratio is directly comparable across the pool.
+            # 100 USDC matches the user's normal config.json stake.
             "--stake-amount",
-            str(self.config.stake_amount),
+            str(100.0 if signal.signal_type == "random_baseline" else self.config.stake_amount),
             "--export",
             "trades",
             "--export-filename",
             export_name,
-            # Pool runs override max_open_trades to maximize trade density.
-            # Each random entry should be taken (no capital throttling) so the
-            # pool grows from ~192 trades to 1500-2500. The bootstrap layer
-            # then re-applies `null_pool_capital_pct` to simulate the user's
-            # actual allocation when scoring observed strategies.
+            # MOT=50 is the sweet spot: enough parallelism for ~all 2000
+            # random entries to find a slot over the timerange (50 parallel
+            # x ~6500 bars / ~30 bar trade duration ≈ 10k capacity), while
+            # staying fast (per-bar cost scales with concurrent trades).
+            # MOT=999 made freqtrade churn 100 simultaneous positions and
+            # was visibly slow.
             "--max-open-trades",
-            str(999 if signal.signal_type == "random_baseline" else self.config.max_open_trades),
+            str(50 if signal.signal_type == "random_baseline" else self.config.max_open_trades),
             "--breakdown",
             "month",
         ]
+
+        # Pool builds use an isolated user_data_dir so concurrent workers
+        # don't collide on backtest_results/backtest-result-{TS}.zip when
+        # freqtrade ignores --export-filename (writes get corrupted otherwise).
+        pool_uds = signal.params.get("_user_data_dir_override")
+        if pool_uds:
+            cmd += ["--user-data-dir", str(pool_uds)]
 
         # Retry loop
         for attempt in range(self.max_retries + 1):
@@ -399,6 +416,23 @@ class BacktestRunner:
                     timeout=180,
                     cwd=self.config.freqtrade_path,
                 )
+
+                # Bail on signal-kill (rc<0 means killed by signal: SIGINT=-2,
+                # SIGTERM=-15, SIGKILL=-9). Retrying is pointless and the
+                # rate-limit regex can false-match CCXT init logs → infinite
+                # retry loop on user Ctrl-C otherwise.
+                if result.returncode < 0:
+                    self.completed += 1
+                    if signal.signal_type == "random_baseline" or self.debug:
+                        sig_name = {-2: "SIGINT", -9: "SIGKILL", -15: "SIGTERM"}.get(
+                            result.returncode, f"sig{-result.returncode}"
+                        )
+                        with print_lock:
+                            print(
+                                f"  🛑 freqtrade killed by {sig_name} "
+                                f"({signal.name} {pair} {actual_tf}) — bailing without retry"
+                            )
+                    return None
 
                 # Only treat as rate-limit if the process actually failed.
                 # CCXT has its own internal rate-limit retry — if freqtrade
@@ -426,6 +460,18 @@ class BacktestRunner:
                     self._debug_output(signal.name, result)
 
                 if result.returncode != 0:
+                    # ALWAYS log random_baseline failures — silent ones
+                    # produce 0 pools / 0 p-values, which is unrecoverable.
+                    if signal.signal_type == "random_baseline" or self.debug:
+                        with print_lock:
+                            err = (result.stderr or "")[-500:]
+                            out_tail = (result.stdout or "")[-300:]
+                            print(
+                                f"  💥 freqtrade rc={result.returncode} for "
+                                f"{signal.name} ({pair} {actual_tf}):\n"
+                                f"    stderr: {err!r}\n"
+                                f"    stdout(tail): {out_tail!r}"
+                            )
                     return None
 
                 parsed = parse_freqtrade_output(result.stdout)
@@ -450,6 +496,20 @@ class BacktestRunner:
                     self._print_result(parsed)
                     return parsed
 
+                # Silent-failure case: freqtrade ran (rc=0) but produced no
+                # parseable trades. ALWAYS log for random_baseline so 0-trade
+                # pool runs surface — silent return None is a black box otherwise.
+                if signal.signal_type == "random_baseline" or self.debug:
+                    n_tr = (parsed or {}).get("trades", 0)
+                    parsed_ok = parsed is not None
+                    out_tail = (result.stdout or "")[-300:]
+                    with print_lock:
+                        print(
+                            f"  ⚠ {signal.name} ({pair} {actual_tf}) rc=0 but "
+                            f"trades={n_tr} (parsed={parsed_ok}) → no usable result"
+                        )
+                        if self.debug:
+                            print(f"    stdout(tail): {out_tail!r}")
                 return None
 
             except subprocess.TimeoutExpired:
@@ -465,9 +525,15 @@ class BacktestRunner:
 
             except Exception as e:
                 self.completed += 1
-                if self.debug:
+                # ALWAYS log random_baseline exceptions (e.g., FileNotFoundError
+                # when freqtrade isn't on PATH). These failures cascade into
+                # 0 pools / 0 p-values, which is hard to diagnose without logs.
+                if signal.signal_type == "random_baseline" or self.debug:
                     with print_lock:
-                        print(f"  💥 {signal.name}: {e}")
+                        print(
+                            f"  💥 {signal.name} ({pair} {timeframe}): "
+                            f"{type(e).__name__}: {e}"
+                        )
                 return None
 
         self.completed += 1
@@ -609,14 +675,41 @@ class BacktestRunner:
                 continue
         return None
 
+    # Minimum trades a pool must have to be usable. Lowered from 50 → 20
+    # because higher TFs (4h+) over short timeranges naturally produce
+    # fewer trades. Below 20 the bootstrap is too noisy.
+    NULL_POOL_MIN_TRADES: int = 20
+
+    def _phase1_log(self, msg: str) -> None:
+        """Print without breaking the tqdm bar.
+
+        tqdm provides .write() which coordinates with the rendered bar (clears
+        it, prints the message, redraws). When the bar isn't active (e.g.
+        running outside Phase 1) this falls back to a plain locked print.
+        """
+        if self._phase1_pbar is not None:
+            self._phase1_pbar.write(msg)
+        else:
+            with print_lock:
+                print(msg, flush=True)
+
     def _build_null_pool_for_cell(
         self,
         cell: Tuple[str, str, str, str],
     ) -> bool:
         """Build (or reuse) the null pool for a single cell.
 
+        Each cell runs freqtrade in an isolated temp `user_data_dir` so the
+        export goes to a unique `{tmpdir}/backtest_results/` — avoids the
+        race condition where parallel workers write `backtest-result-{TS}.zip`
+        with identical second-resolution timestamps and corrupt each other's
+        zips (BadZipFile / CRC errors).
+
         Returns True on cache hit / successful build, False on failure.
         """
+        import shutil
+        import tempfile
+
         pair, tf, exit_cfg, direction = cell
         cache_key = compute_cache_key(
             pair, tf, exit_cfg,
@@ -629,32 +722,54 @@ class BacktestRunner:
 
         if not self.config.refresh_null_pool:
             existing = load_pool(cache_key, cache_dir)
-            if existing is not None and len(existing) >= 50:
+            if existing is not None and len(existing) >= self.NULL_POOL_MIN_TRADES:
                 return True
 
         pool_sig = self._synthesize_pool_signal(exit_cfg, direction)
-        # The strategy generator will build class name as S_<sanitized_name>_<tf>
         class_name = f"S_{sanitize_class_name(pool_sig.name)}_{tf}"
-        t_start = time.time() - 1.0  # 1s slack for fs mtime granularity
 
-        result = self.run_single(pool_sig, pair, tf)
-        if result is None:
-            return False
+        # Isolate this freqtrade run: its export goes to a private temp dir.
+        pool_user_data = Path(tempfile.mkdtemp(prefix="ftpool_"))
+        (pool_user_data / "backtest_results").mkdir(parents=True, exist_ok=True)
+        # Smuggled through signal.params so run_single can append --user-data-dir
+        pool_sig.params["_user_data_dir_override"] = str(pool_user_data)
 
-        # Find the export zip, extract trades, save parquet
-        zp = self._find_pool_export_zip(class_name, since=t_start)
-        if zp is None:
-            # Fallback: rebuild full export index and lookup
-            self._export_index = self._build_export_index()
-            zp = self._export_index.get((class_name, tf, self.config.timerange))
-        if zp is None:
-            return False
+        try:
+            result = self.run_single(pool_sig, pair, tf)
+            if result is None:
+                self._phase1_log(
+                    f"  ! Pool build failed (run_single None): "
+                    f"{pair} {tf} {exit_cfg} dir={direction}"
+                )
+                return False
 
-        df = extract_trades_from_zip(zp, class_name)
-        if df is None or len(df) < 50:
-            return False
-        save_pool(df, cache_key, cache_dir)
-        return True
+            zips = list((pool_user_data / "backtest_results").glob("*.zip"))
+            if not zips:
+                self._phase1_log(
+                    f"  ! Pool build failed (no zip in {pool_user_data.name}): "
+                    f"{class_name}"
+                )
+                return False
+            # Only one zip should exist in the isolated dir; pick the most
+            # recent if somehow multiple were written.
+            zp = max(zips, key=lambda p: p.stat().st_mtime)
+
+            df = extract_trades_from_zip(zp, class_name, log=self._phase1_log)
+            if df is None:
+                self._phase1_log(
+                    f"  ! Pool build failed (extract None): {class_name} from {zp.name}"
+                )
+                return False
+            if len(df) < self.NULL_POOL_MIN_TRADES:
+                self._phase1_log(
+                    f"  ! Pool too small ({len(df)} < {self.NULL_POOL_MIN_TRADES}): "
+                    f"{class_name}"
+                )
+                return False
+            save_pool(df, cache_key, cache_dir)
+            return True
+        finally:
+            shutil.rmtree(pool_user_data, ignore_errors=True)
 
     def _build_null_pools_phase(
         self,
@@ -716,33 +831,72 @@ class BacktestRunner:
 
         n_built = 0
         if cells_to_run:
+            import sys
+            # Defensive: try .auto first, then plain tqdm, then None.
+            # If neither imports we fall back to a one-shot startup print so
+            # the user sees activity (very rare: tqdm is in requirements).
+            tqdm_cls = None
             try:
-                from tqdm.auto import tqdm
-            except ImportError:
-                tqdm = None
-            with ThreadPoolExecutor(max_workers=self.config.max_workers) as ex:
-                futures = {
-                    ex.submit(self._build_null_pool_for_cell, c): c
-                    for c in cells_to_run
-                }
-                # tqdm.auto picks the right backend (notebook vs terminal). It
-                # leaves the bar pinned at the bottom; per-line prints from
-                # _print_result push it up but tqdm redraws on each update.
-                iterator = (
-                    tqdm(
-                        as_completed(futures),
+                from tqdm.auto import tqdm as tqdm_cls
+            except Exception:
+                try:
+                    from tqdm import tqdm as tqdm_cls
+                except Exception as e:
+                    with print_lock:
+                        print(
+                            f"  Note: tqdm unavailable ({type(e).__name__}: {e}); "
+                            f"Phase 1 will run without progress bar.",
+                            flush=True,
+                        )
+
+            pbar = None
+            if tqdm_cls is not None:
+                # ncols=80 fixed (some SSH sessions report 0 cols and tqdm
+                # silently disables itself). mininterval=0 + miniters=1 so
+                # every update redraws. ascii=True for non-Unicode terminals.
+                # refresh() + flush so the initial "0/N" bar shows before
+                # the first completion lands.
+                try:
+                    pbar = tqdm_cls(
                         total=len(cells_to_run),
-                        desc="🎲 Pool builds",
+                        desc="Pool builds",
                         unit="cell",
-                        smoothing=0.1,
-                        dynamic_ncols=True,
+                        file=sys.stdout,
+                        ncols=80,
+                        mininterval=0,
+                        miniters=1,
+                        ascii=True,
+                        leave=True,
+                        position=0,
                     )
-                    if tqdm is not None
-                    else as_completed(futures)
-                )
-                for f in iterator:
-                    if f.result():
-                        n_built += 1
+                    pbar.refresh()
+                    sys.stdout.flush()
+                except Exception as e:
+                    with print_lock:
+                        print(
+                            f"  Note: tqdm init failed ({type(e).__name__}: {e}); "
+                            f"continuing without bar.",
+                            flush=True,
+                        )
+                    pbar = None
+
+            self._phase1_pbar = pbar
+
+            try:
+                with ThreadPoolExecutor(max_workers=self.config.max_workers) as ex:
+                    futures = {
+                        ex.submit(self._build_null_pool_for_cell, c): c
+                        for c in cells_to_run
+                    }
+                    for f in as_completed(futures):
+                        if f.result():
+                            n_built += 1
+                        if pbar is not None:
+                            pbar.update(1)
+            finally:
+                if pbar is not None:
+                    pbar.close()
+                self._phase1_pbar = None
 
         self.total, self.completed = saved_total, saved_completed
         with print_lock:
@@ -1117,7 +1271,14 @@ class BacktestRunner:
             )
 
     def _print_result(self, r: Dict):
-        """Print a single result line: trades L/S, WR L/S, PnL, DD + duration, Sharpe."""
+        """Print a single result line: trades L/S, WR L/S, PnL, DD + duration, Sharpe.
+
+        Suppresses output for random_baseline pool builds — Phase 1 has its own
+        tqdm bar; per-line 🎲 prints would drown out the bar and clutter the
+        diagnostic. Failures still log via the dedicated paths.
+        """
+        if r.get("signal_type") == "random_baseline":
+            return
         with print_lock:
             # Aggregate L/S trade counts + wins across regimes
             long_n = long_w = short_n = short_w = 0

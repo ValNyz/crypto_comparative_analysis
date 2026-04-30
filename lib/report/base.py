@@ -40,7 +40,7 @@ class ReportGenerator:
         self.df = df
         self.config = config or Config()
 
-    def print_full_report(self, top_n: int = 25):
+    def print_full_report(self, top_n: int = 50):
         """
         Print the complete report.
 
