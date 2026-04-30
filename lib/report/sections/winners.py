@@ -16,6 +16,7 @@ Three views, each answering a different question about robustness:
 import pandas as pd
 from ..formatters import print_header
 from ...utils.helpers import short_pair
+from ..utils import strip_exit_suffix, dedup_for_display
 
 
 # Trades floor for ranking display: Sharpe is unreliable below this and the
@@ -40,17 +41,25 @@ def print_winners(df: pd.DataFrame, top_n: int = 50, min_trades: int = RANK_MIN_
     has_pvals = "p_value_adj" in df.columns and df["p_value_adj"].notna().any()
     # Apply min_trades floor — we don't want to celebrate signals on 5 trades
     df_f = df[df["trades"].fillna(0) >= min_trades] if "trades" in df.columns else df
+    if "signal_root" not in df_f.columns:
+        df_f = df_f.copy()
+        df_f["signal_root"] = df_f.apply(
+            lambda r: strip_exit_suffix(str(r["signal"]), r.get("exit_config")),
+            axis=1,
+        )
 
     print_header(
         f"🏆 TOP MÉTHODES — Significativité statistique (N≥{min_trades} trades)"
     )
 
     if has_pvals:
-        # Total variants per (signal, pair, tf) — denominator of n_var ratio.
-        # Computed on the FULL trade-floor-filtered df, before significance gates.
+        # Total variants per (signal_root, pair) — denominator of n_var ratio.
+        # Collapses both TF AND exit siblings: the displayed row keeps the
+        # best (TF, exit) by sort order ; n_var = X/Y where Y is total variants
+        # tested for this (signal_root, pair) combo (across all TFs and exits).
         total_var = (
-            df_f.groupby(["signal", "pair", "timeframe"]).size().rename("n_total")
-            if {"signal", "pair", "timeframe"}.issubset(df_f.columns)
+            df_f.groupby(["signal_root", "pair"]).size().rename("n_total")
+            if {"signal_root", "pair"}.issubset(df_f.columns)
             else None
         )
 
@@ -99,33 +108,36 @@ def print_winners(df: pd.DataFrame, top_n: int = 50, min_trades: int = RANK_MIN_
             "\n  ⚠️  Pas de p-values disponibles (null pool désactivé ou pools manquants)."
         )
         print(f"     Ranking par Sharpe pur (N≥{min_trades}) :\n")
-        top = df_f.nlargest(top_n, "sharpe")
+        # Same dedup as Tier 1/2: collapse TF + exit siblings.
+        df_pool = dedup_for_display(df_f, sort_cols="sharpe")
+        top = df_pool.nlargest(top_n, "sharpe")
         _print_block(top, show_pvals=False)
 
 
 def _dedup_with_count(
-    sub: pd.DataFrame, total_var: pd.Series | None
+    sub: pd.DataFrame, total_var
 ) -> pd.DataFrame:
-    """Keep best (already pre-sorted) row per (signal, pair, tf) and tag n_var.
+    """Keep best (already pre-sorted) row per (signal_root, pair) and tag n_var.
 
-    `n_var` = "X/Y" where X = FDR-sig variants in the group (or rows in `sub`),
-    Y = total variants tested for that combo (from `total_var`). Surfaces
-    parameter-robustness: 9/9 means every exit/SL variant of this combo passed
-    FDR → very robust ; 2/9 means it's an edge case dependent on specific
-    exit/SL params.
+    Collapses BOTH TF and exit siblings — input is pre-sorted by criterion
+    (e.g., p_adj asc), so the kept row carries the best (TF, exit) for that
+    (signal_root, pair). `n_var` = "X/Y" where X = FDR-sig variants of the
+    combo, Y = total variants tested (across all TFs and exits). 9/9 means
+    every TF×exit variant of this combo passed FDR → very robust ; 2/9 means
+    fragile, dependent on a specific (TF, exit) pair.
     """
-    if len(sub) == 0 or not {"signal", "pair", "timeframe"}.issubset(sub.columns):
+    if len(sub) == 0 or not {"signal_root", "pair"}.issubset(sub.columns):
         sub = sub.copy()
         sub["n_var"] = ""
         return sub
-    n_sig = sub.groupby(["signal", "pair", "timeframe"]).size().rename("_n_sig")
+    n_sig = sub.groupby(["signal_root", "pair"]).size().rename("_n_sig")
     deduped = sub.drop_duplicates(
-        subset=["signal", "pair", "timeframe"], keep="first"
+        subset=["signal_root", "pair"], keep="first"
     ).copy()
-    deduped = deduped.merge(n_sig, on=["signal", "pair", "timeframe"], how="left")
+    deduped = deduped.merge(n_sig, on=["signal_root", "pair"], how="left")
     if total_var is not None:
         deduped = deduped.merge(
-            total_var, on=["signal", "pair", "timeframe"], how="left"
+            total_var, on=["signal_root", "pair"], how="left"
         )
         deduped["n_var"] = deduped.apply(
             lambda r: f"{int(r['_n_sig'])}/{int(r['n_total'])}", axis=1
@@ -227,7 +239,8 @@ def _print_temporal_robustness(df: pd.DataFrame, top_n: int = 50):
 
     Combines: raw p<0.10 + consistency ≥ 60% (≥6 of 10 months profitable).
     Sorted by `consistency × Sharpe` so a 90% consistency, 0.5 Sharpe beats
-    a 60% consistency, 0.7 Sharpe.
+    a 60% consistency, 0.7 Sharpe. Display dedup: same exit-suffix collapse
+    as Tier 1 — keep best (robust_score) per (signal_root, pair, tf).
     """
     if "consistency" not in df.columns or "p_value" not in df.columns:
         return
@@ -240,6 +253,11 @@ def _print_temporal_robustness(df: pd.DataFrame, top_n: int = 50):
         return
     df_t["robust_score"] = df_t["consistency"].astype(float) * df_t["sharpe"]
     df_t = df_t.sort_values("robust_score", ascending=False)
+    # Dedup display: collapse TF + exit siblings, keep best robust_score
+    if "signal_root" in df_t.columns:
+        df_t = df_t.drop_duplicates(
+            subset=["signal_root", "pair"], keep="first"
+        )
 
     print(
         f"\n  📅 ROBUSTESSE TEMPORELLE — p<0.10 ET ≥60% mois profitables : "
@@ -248,9 +266,10 @@ def _print_temporal_robustness(df: pd.DataFrame, top_n: int = 50):
     print(
         f"\n  {'#':<3} {'Signal':<30} {'Pair':<6} {'TF':<4} │ "
         f"{'Sharpe':<7} {'Cons%':<6} {'Mois+':<6} {'PnL%':<7} "
+        f"{'μ_m':<6} {'σ_m':<6} "
         f"{'p':<6} {'p_adj':<6} {'q':<6} {'Score':<7}"
     )
-    print("  " + "─" * 117)
+    print("  " + "─" * 131)
     for i, (_, r) in enumerate(df_t.head(top_n).iterrows(), 1):
         cons = r.get("consistency", 0) or 0
         m_prof = r.get("months_profitable", 0) or 0
@@ -264,11 +283,14 @@ def _print_temporal_robustness(df: pd.DataFrame, top_n: int = 50):
         )
         qv = r.get("q_value")
         q_s = f"{qv:.3f}" if qv is not None and not pd.isna(qv) else " n/a "
+        mu_m = r.get("avg_month", 0) or 0
+        sd_m = r.get("std_month", 0) or 0
         print(
             f"  {i:<3} {r['signal']:<30} {short_pair(r['pair']):<6} "
             f"{r['timeframe']:<4} │ "
             f"{r['sharpe']:<+7.2f} {cons:<6.0f} {mois:<6} "
-            f"{r['profit_pct']:<+7.1f} {r['p_value']:<6.3f} {adj_s:<6} {q_s:<6} "
+            f"{r['profit_pct']:<+7.1f} {mu_m:<+6.1f} {sd_m:<6.1f} "
+            f"{r['p_value']:<6.3f} {adj_s:<6} {q_s:<6} "
             f"{r['robust_score']:<7.1f}"
         )
 
@@ -281,16 +303,18 @@ def _print_block(rows: pd.DataFrame, show_pvals: bool = True):
     if show_pvals:
         header = (
             f"\n  {'#':<3} {'Signal':<30} {'Pair':<6} {'TF':<4} {'Exit':<14} │ "
-            f"{'Tr':<4} {'PnL%':<7} {'Sharpe':<7} {'DD%':<5} {'Cons%':<5} │ "
+            f"{'Tr':<4} {'PnL%':<7} {'Sharpe':<7} {'DD%':<5} {'Cons%':<5} "
+            f"{'μ_m':<6} {'σ_m':<6} │ "
             f"{'p':<6} {'p_adj':<6} {'q':<6} {'n_var':<6}"
         )
-        sep_w = 144
+        sep_w = 158
     else:
         header = (
             f"\n  {'#':<3} {'Signal':<30} {'Pair':<6} {'TF':<4} {'Exit':<14} │ "
-            f"{'Tr':<4} {'PnL%':<7} {'Sharpe':<7} {'DD%':<5} {'Cons%':<5}"
+            f"{'Tr':<4} {'PnL%':<7} {'Sharpe':<7} {'DD%':<5} {'Cons%':<5} "
+            f"{'μ_m':<6} {'σ_m':<6}"
         )
-        sep_w = 110
+        sep_w = 124
 
     print(header)
     print("  " + "─" * sep_w)
@@ -300,11 +324,14 @@ def _print_block(rows: pd.DataFrame, show_pvals: bool = True):
         if pd.isna(exit_cfg):
             exit_cfg = "none"
         cons = r.get("consistency", 0) or 0
+        mu_m = r.get("avg_month", 0) or 0
+        sd_m = r.get("std_month", 0) or 0
         line = (
             f"  {i:<3} {r['signal']:<30} {short_pair(r['pair']):<6} "
             f"{r['timeframe']:<4} {str(exit_cfg)[:14]:<14} │ "
             f"{r['trades']:<4d} {r['profit_pct']:<+7.1f} "
-            f"{r['sharpe']:<+7.2f} {r['max_dd_pct']:<5.1f} {cons:<5.0f}"
+            f"{r['sharpe']:<+7.2f} {r['max_dd_pct']:<5.1f} {cons:<5.0f} "
+            f"{mu_m:<+6.1f} {sd_m:<6.1f}"
         )
         if show_pvals:
             pv = r.get("p_value")

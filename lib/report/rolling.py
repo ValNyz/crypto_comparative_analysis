@@ -48,8 +48,9 @@ class RollingReportGenerator(ReportGenerator):
             int(consistency_df["n_windows"].max()) if len(consistency_df) > 0 else 0
         )
 
-    def print_full_report(self, top_n: int = 25):
-        """Affiche le rapport rolling complet."""
+    def print_full_report(self, top_n: int = 25, show_regime: bool = False):
+        """Affiche le rapport rolling complet (show_regime ignoré ici)."""
+        _ = show_regime  # signature compat with parent
         if len(self.consistency_df) == 0:
             print("\n❌ Aucun résultat de rolling backtest!")
             return

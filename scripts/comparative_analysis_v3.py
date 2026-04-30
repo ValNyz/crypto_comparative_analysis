@@ -166,6 +166,17 @@ Examples:
         "--min-windows", type=int, default=2, help="Min fenêtres pour stats (défaut: 3)"
     )
 
+    # Display options
+    parser.add_argument(
+        "--show-regime",
+        action="store_true",
+        help=(
+            "Include the three regime sections (distribution, performance, "
+            "signal x regime matrix) in the report. Off by default — verbose "
+            "and rarely actionable day-to-day."
+        ),
+    )
+
     # Debug/utility
     parser.add_argument(
         "--debug", "-d", action="store_true", help="Enable debug output"
@@ -310,7 +321,7 @@ def _run_standard(config, signals, pairs, args):
 
     # Rapport
     report = ReportGenerator(df, config)
-    report.print_full_report()
+    report.print_full_report(show_regime=args.show_regime)
 
     return df
 

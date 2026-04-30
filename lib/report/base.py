@@ -24,6 +24,7 @@ from .sections.winners import print_winners
 from .sections.drill_down import print_drill_down
 from .sections.blacklist import print_blacklist
 from .formatters import print_header
+from .utils import add_signal_root
 
 
 class ReportGenerator:
@@ -40,12 +41,16 @@ class ReportGenerator:
         self.df = df
         self.config = config or Config()
 
-    def print_full_report(self, top_n: int = 50):
+    def print_full_report(self, top_n: int = 50, show_regime: bool = False):
         """
         Print the complete report.
 
         Args:
             top_n: Number of top results to show in rankings
+            show_regime: If True, include the three regime sections
+                (distribution, performance, signal × regime matrix). Default
+                False — those sections are verbose and rarely actionable
+                day-to-day; opt in via flag when you need them.
         """
         if len(self.df) == 0:
             print("\n❌ Aucun résultat valide!")
@@ -55,6 +60,11 @@ class ReportGenerator:
         if len(self.df) == 0:
             print("\n❌ Tous les résultats ont été filtrés (< trades/mois)!")
             return
+
+        # Add `signal_root` (signal name minus exit suffix) once, so all
+        # sections can dedup display by (signal_root, pair, tf) without
+        # re-computing it. Idempotent: no-op on later calls.
+        self.df = add_signal_root(self.df)
 
         self._print_header()
         print_global_metrics(self.df)
@@ -68,9 +78,10 @@ class ReportGenerator:
         # Drill-down on top 10 deduped: per-month (with intra-month DD +
         # market change) and per-regime — answers "is it robust or a fluke?"
         print_drill_down(self.df, config=self.config, top_n=10)
-        print_regime_distribution(self.df)
-        print_regime_performance(self.df)
-        print_signal_regime_matrix(self.df)
+        if show_regime:
+            print_regime_distribution(self.df)
+            print_regime_performance(self.df)
+            print_signal_regime_matrix(self.df)
         print_exit_analysis(self.df)
         print_top_by_sharpe(self.df, top_n)
         if "pair" in self.df.columns and self.df["pair"].nunique() > 1:

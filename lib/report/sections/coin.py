@@ -6,6 +6,7 @@
 import pandas as pd
 from typing import Dict, Any
 from ..formatters import print_header
+from ..utils import dedup_for_display
 from ...utils.helpers import short_pair
 
 
@@ -47,23 +48,30 @@ def print_per_coin_summary(df: pd.DataFrame, top_n: int = 5):
         )
         print(f"{'─' * 110}")
 
-        # Top N par Sharpe pour cette paire
-        top = pair_df.nlargest(min(top_n, len(pair_df)), "sharpe")
+        # Top N par Sharpe pour cette paire — dedup TF + exit siblings.
+        # pair est déjà fixé par la boucle, donc dedup par signal_root seul.
+        pair_df_disp = dedup_for_display(
+            pair_df, sort_cols="sharpe", keys=("signal_root",)
+        )
+        top = pair_df_disp.nlargest(min(top_n, len(pair_df_disp)), "sharpe")
 
         print(
             f"\n  {'#':<3} {'Signal':<30} {'TF':<4} │ "
-            f"{'Tr':<4} {'WR%':<6} {'PnL%':<8} {'Sharpe':<7} │ {'Exit':<12}"
+            f"{'Tr':<4} {'WR%':<6} {'PnL%':<8} {'Sharpe':<7} "
+            f"{'μ_m':<6} {'σ_m':<6} │ {'Exit':<12}"
         )
-        print("  " + "─" * 95)
+        print("  " + "─" * 109)
 
         for i, (_, r) in enumerate(top.iterrows(), 1):
             exit_cfg = r.get("exit_config", "none")
             if pd.isna(exit_cfg):
                 exit_cfg = "none"
+            mu_m = r.get("avg_month", 0) or 0
+            sd_m = r.get("std_month", 0) or 0
             print(
                 f"  {i:<3} {r['signal']:<30} {r['timeframe']:<4} │ "
                 f"{r['trades']:<4} {r['win_rate']:<6.1f} {r['profit_pct']:<+8.1f} "
-                f"{r['sharpe']:<+7.2f} │ {exit_cfg:<12}"
+                f"{r['sharpe']:<+7.2f} {mu_m:<+6.1f} {sd_m:<6.1f} │ {exit_cfg:<12}"
             )
 
 

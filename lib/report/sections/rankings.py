@@ -5,40 +5,47 @@
 
 import pandas as pd
 from ..formatters import print_header
+from ..utils import dedup_for_display
 from ...utils.helpers import short_pair
 
 
 def print_top_by_sharpe(df: pd.DataFrame, top_n: int = 25):
-    """Print top results by Sharpe ratio (with p-value when available)."""
-    print_header(f"🏆 TOP {min(top_n, len(df))} GLOBAL PAR SHARPE RATIO")
+    """Print top results by Sharpe ratio (with p-value when available).
 
-    top = df.nlargest(top_n, "sharpe")
-    has_p = "p_value" in df.columns and df["p_value"].notna().any()
+    Display dedup: collapse exit siblings via signal_root before nlargest,
+    so we don't show 3 near-identical rows for the same (signal, pair, tf)
+    differing only in exit. SL/ROI stay distinct (they're separate strats).
+    """
+    df_disp = dedup_for_display(df, sort_cols="sharpe")
+    print_header(f"🏆 TOP {min(top_n, len(df_disp))} GLOBAL PAR SHARPE RATIO")
+
+    top = df_disp.nlargest(top_n, "sharpe")
+    has_p = "p_value" in df_disp.columns and df_disp["p_value"].notna().any()
 
     if has_p:
         print(
             f"\n{'#':<3} {'Signal':<26} {'Pair':<6} {'TF':<4} │ "
             f"{'Tr':<4} {'WR%':<6} {'PnL%':<7} {'Sharpe':<7} {'DD%':<5} │ "
-            f"{'Cons%':<5} {'Best':<7} {'Worst':<7} │ {'p':<6}"
+            f"{'Cons%':<5} {'μ_m':<6} {'σ_m':<6} │ {'p':<6}"
         )
-        print("─" * 117)
+        print("─" * 115)
     else:
         print(
             f"\n{'#':<3} {'Signal':<26} {'Pair':<6} {'TF':<4} │ "
             f"{'Tr':<4} {'WR%':<6} {'PnL%':<7} {'Sharpe':<7} {'DD%':<5} │ "
-            f"{'Cons%':<5} {'Best':<7} {'Worst':<7}"
+            f"{'Cons%':<5} {'μ_m':<6} {'σ_m':<6}"
         )
-        print("─" * 105)
+        print("─" * 103)
 
     for i, (_, r) in enumerate(top.iterrows(), 1):
         cons = r.get("consistency", 0)
-        best_m = r.get("best_month", 0)
-        worst_m = r.get("worst_month", 0)
+        mu_m = r.get("avg_month", 0) or 0
+        sd_m = r.get("std_month", 0) or 0
         line = (
             f"{i:<3} {r['signal']:<26} {short_pair(r['pair']):<6} {r['timeframe']:<4} │ "
             f"{r['trades']:<4} {r['win_rate']:<6.1f} {r['profit_pct']:<+7.1f} "
             f"{r['sharpe']:<+7.2f} {r['max_dd_pct']:<5.1f} │ "
-            f"{cons:<5.0f} {best_m:<+7.1f} {worst_m:<+7.1f}"
+            f"{cons:<5.0f} {mu_m:<+6.1f} {sd_m:<6.1f}"
         )
         if has_p:
             pv = r.get("p_value")

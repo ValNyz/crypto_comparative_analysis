@@ -51,9 +51,15 @@ def print_drill_down(
     if len(sig_df) == 0:
         return
 
-    # Dedupe (signal, pair) → keep row with lowest p_value_adj
-    sig_df = sig_df.sort_values("p_value_adj", ascending=True)
-    sig_df = sig_df.drop_duplicates(subset=["signal", "pair"], keep="first")
+    # Dedupe (signal_root, pair) → keep row with lowest p_value_adj, then
+    # highest sharpe in case of tie. BH ties are common (the algorithm pulls
+    # many adjacent p-values onto the same plateau via cumulative min), so
+    # tiebreaking is important for deterministic output.
+    sig_df = sig_df.sort_values(
+        ["p_value_adj", "sharpe"], ascending=[True, False]
+    )
+    dedup_key = "signal_root" if "signal_root" in sig_df.columns else "signal"
+    sig_df = sig_df.drop_duplicates(subset=[dedup_key, "pair"], keep="first")
     sig_df = sig_df.head(top_n)
     if len(sig_df) == 0:
         return

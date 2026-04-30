@@ -7,6 +7,7 @@ import pandas as pd
 from typing import Optional
 from ...config.base import Config
 from ..formatters import print_header, print_section
+from ..utils import dedup_for_display
 from ...utils.helpers import short_pair
 
 
@@ -64,6 +65,9 @@ def _print_balanced_recommendations(df: pd.DataFrame):
         + df_with_monthly["consistency"] / 100 * 0.3
         + (1 - df_with_monthly["max_dd_pct"] / 20) * 0.3
     )
+    # Dedup TF + exit siblings — collapse to 1 row per (signal_root, pair),
+    # so the top 5 reflect 5 distinct strategies, not 5 variants of the same.
+    df_with_monthly = dedup_for_display(df_with_monthly, sort_cols="balanced_score")
     best_balanced = df_with_monthly.nlargest(5, "balanced_score")
 
     if has_padj:
@@ -78,7 +82,8 @@ def _print_balanced_recommendations(df: pd.DataFrame):
         )
 
     for i, (_, r) in enumerate(best_balanced.iterrows(), 1):
-        avg_m = r.get("avg_month", 0)
+        avg_m = r.get("avg_month", 0) or 0
+        std_m = r.get("std_month", 0) or 0
         pv_adj = r.get("p_value_adj")
         pv_str = (
             f"p_adj={pv_adj:.3f}"
@@ -89,7 +94,7 @@ def _print_balanced_recommendations(df: pd.DataFrame):
             f"     {i}. {r['signal']:<26} ({short_pair(r['pair'])}, {r['timeframe']})\n"
             f"        Sharpe={r['sharpe']:+.2f} │ Cons={r['consistency']:.0f}% │ "
             f"DD={r['max_dd_pct']:.1f}% │ PnL={r['profit_pct']:+.1f}% │ "
-            f"Avg/mois={avg_m:+.1f} USDC │ {pv_str}\n"
+            f"μ_m={avg_m:+.1f}±{std_m:.1f} USDC │ {pv_str}\n"
         )
 
     # Hard reminder: bootstrap doesn't protect against regime shift.

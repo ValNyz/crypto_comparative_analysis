@@ -57,9 +57,12 @@ def print_regime_distribution(df: pd.DataFrame):
     print(f"\n  Total: {total_trades} trades")
 
 
+from ..utils import dedup_for_display
+
+
 def print_regime_performance(df: pd.DataFrame):
     """Print performance by regime."""
-    regime_data = _collect_regime_data(df)
+    regime_data = _collect_regime_data(dedup_for_display(df, sort_cols="sharpe"))
 
     print_header("🎯 PERFORMANCE PAR RÉGIME DE MARCHÉ")
     print()
@@ -149,7 +152,7 @@ def print_signal_regime_matrix(df: pd.DataFrame):
     print_header("📊 MATRICE SIGNAL × RÉGIME (Top 20 signaux)")
     print()
 
-    matrix_summary = _build_matrix_summary(df)
+    matrix_summary = _build_matrix_summary(dedup_for_display(df, sort_cols="sharpe"))
 
     # Compact view
     print(
