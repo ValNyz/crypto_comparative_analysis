@@ -67,14 +67,14 @@ def color_calmar(value, formatted: str) -> str:
 
 
 def color_dd(value, formatted: str) -> str:
-    """DD < 5% → bold green, < 10% → green, else neutral. Lower is better."""
+    """DD < 4% → bold green, < 8% → green, else neutral. Lower is better."""
     try:
         v = float(value)
     except (TypeError, ValueError):
         return formatted
-    if v < 5.0:
+    if v < 4.0:
         return _wrap(formatted, "bold green")
-    if v < 10.0:
+    if v < 8.0:
         return _wrap(formatted, "green")
     return formatted
 
@@ -95,8 +95,8 @@ def color_pvalue(value, formatted: str) -> str:
 def color_pnl_composite(formatted: str, dd, p) -> str:
     """PnL colored only when BOTH DD and p reach thresholds simultaneously.
 
-    Bold green when both at the strictest threshold: DD < 5% AND p ≤ 0.01.
-    Green when both at the lighter threshold: DD < 10% AND p ≤ 0.05.
+    Bold green when both at the strictest threshold: DD < 4% AND p ≤ 0.01.
+    Green when both at the lighter threshold: DD < 8% AND p ≤ 0.05.
     Else neutral. The composite gate avoids highlighting PnL on strats that
     look profitable but with high DD or weak significance.
     """
@@ -107,8 +107,8 @@ def color_pnl_composite(formatted: str, dd, p) -> str:
         pv = float(p)
     except (TypeError, ValueError):
         return formatted
-    if d < 5.0 and pv <= 0.01:
+    if d < 4.0 and pv <= 0.01:
         return _wrap(formatted, "bold green")
-    if d < 10.0 and pv <= 0.05:
+    if d < 8.0 and pv <= 0.05:
         return _wrap(formatted, "green")
     return formatted
