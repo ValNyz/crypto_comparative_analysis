@@ -32,16 +32,11 @@ class Config:
     min_trades: int = 0
     min_sharpe: float = -2
     min_months: int = 2
-    # Frequency floor: drop strats with avg trade-rate below this from the
-    # report. A signal that fires <2x/month over the timerange is too
-    # sparse for stable Sharpe / p-value estimates. Use 0.0 to disable.
+    # Volume floor: drop strats with `trades < min_trades_per_month × months_total`.
+    # Dynamic — scales with backtest length so a 24-month run needs twice
+    # as many trades as a 12-month run for the same statistical density.
+    # Set to 0 to disable.
     min_trades_per_month: float = 2.0
-    # Absolute floor: drop strats with fewer total trades regardless of
-    # months_total. Catches edge cases like 2 trades concentrated in 1
-    # month (passes per-month filter at 2.0 but Sharpe is meaningless on
-    # 2 samples — std collapses, ratio explodes to 4-digit numbers).
-    # Matches RANK_MIN_TRADES / NULL_POOL_MIN_TRADES used elsewhere.
-    min_trades_total: int = 20
     max_workers: int = 6
 
     # Wallet/Position

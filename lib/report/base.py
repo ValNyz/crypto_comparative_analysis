@@ -96,42 +96,30 @@ class ReportGenerator:
         print(f"\n{'=' * 120}")
 
     def _filter_low_frequency(self):
-        """Drop rows that fail the trade-volume gates before any section runs.
+        """Drop rows whose trade count is below `min_trades_per_month × months_total`.
 
-        Two cumulative gates:
-          - `min_trades_total` (absolute): a strat with too few trades has
-            no statistical mass — Sharpe explodes when std collapses to 0
-            on 2-3 nearly-identical trades.
-          - `min_trades_per_month` (rate): a strat that fires sporadically
-            has no temporal stability even if total count is decent.
-        Both must hold. Either gate at 0 disables it.
+        Dynamic floor that scales with backtest length — a 24-month run
+        requires twice as many trades as a 12-month run for the same
+        statistical density. Replaces the previous static `min_trades_total`
+        floor (which was generous on long runs and strict on short ones).
+        Set `min_trades_per_month = 0` to disable.
         """
         rate_threshold = float(getattr(self.config, "min_trades_per_month", 0.0) or 0.0)
-        abs_threshold = int(getattr(self.config, "min_trades_total", 0) or 0)
-        if rate_threshold <= 0 and abs_threshold <= 0:
+        if rate_threshold <= 0:
             return
         if "trades" not in self.df.columns or "months_total" not in self.df.columns:
             return
         before = len(self.df)
         months = self.df["months_total"].fillna(0).astype(float)
         trades = self.df["trades"].fillna(0).astype(float)
-        rate = trades / months.where(months > 0, other=1.0)
-        keep = months > 0
-        if abs_threshold > 0:
-            keep &= trades >= abs_threshold
-        if rate_threshold > 0:
-            keep &= rate >= rate_threshold
+        floor = rate_threshold * months
+        keep = (months > 0) & (trades >= floor)
         self.df = self.df[keep].copy()
         dropped = before - len(self.df)
         if dropped > 0:
-            parts = []
-            if abs_threshold > 0:
-                parts.append(f"trades<{abs_threshold}")
-            if rate_threshold > 0:
-                parts.append(f"<{rate_threshold:g}/mois")
             print(
                 f"\n  Filtre volume: {dropped}/{before} strats retirées "
-                f"({' OU '.join(parts)})"
+                f"(trades < {rate_threshold:g} × months_total)"
             )
 
     def _print_header(self):
