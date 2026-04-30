@@ -171,9 +171,12 @@ def find_export_zip_for(
 
 
 def build_export_index(export_dir: Path, timerange: str) -> Dict:
-    """Scan *.meta.json -> {(class_name, tf, timerange): zip_path}.
+    """Scan *.meta.json -> {(class_name, tf, timerange, pair): zip_path}.
 
-    Same logic as runner._build_export_index but without runner state.
+    Same logic as runner._build_export_index but without runner state. The
+    pair is read from inside each zip; without it, per-pair zips collide on
+    (class_name, tf, timerange) and the drill-down would surface the wrong
+    pair's trades.
     """
     index: Dict = {}
     if not export_dir.exists():
@@ -201,8 +204,37 @@ def build_export_index(export_dir: Path, timerange: str) -> Dict:
             cached_range = f"{start_str}-{end_str}"
             if cached_range and cached_range != timerange:
                 continue
-            index[(class_name, tf, timerange)] = zip_path
+            pair = _extract_pair_from_zip(zip_path, class_name)
+            if pair is None:
+                continue
+            index[(class_name, tf, timerange, pair)] = zip_path
     return index
+
+
+def _extract_pair_from_zip(zip_path: Path, class_name: str) -> Optional[str]:
+    """Read the first trade's pair from a freqtrade backtest zip."""
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            inner = next(
+                (n for n in z.namelist()
+                 if n.endswith(".json") and "_config" not in n),
+                None,
+            )
+            if not inner:
+                return None
+            data = json.loads(z.read(inner))
+        strat = (data.get("strategy") or {}).get(class_name) or {}
+        trades = strat.get("trades") or []
+        if trades:
+            p = trades[0].get("pair")
+            if p:
+                return str(p)
+        pairs = data.get("pairs") or []
+        if pairs and isinstance(pairs, list):
+            return str(pairs[0])
+    except Exception:
+        return None
+    return None
 
 
 def extract_trades_from_zip_safe(

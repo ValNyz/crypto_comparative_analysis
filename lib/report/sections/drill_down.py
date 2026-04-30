@@ -155,8 +155,9 @@ def _try_extract_drill_trades(
         return None
     sig_name = str(r["signal"])
     tf = str(r["timeframe"])
+    pair = str(r["pair"])
     class_name = f"S_{sanitize_class_name(sig_name)}_{tf}"
-    zip_path = export_index.get((class_name, tf, timerange))
+    zip_path = export_index.get((class_name, tf, timerange, pair))
     if zip_path is None:
         return None
     trades = extract_trades_from_zip_safe(zip_path, class_name)

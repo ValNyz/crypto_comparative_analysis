@@ -93,10 +93,12 @@ class BacktestRunner:
 
         # Cache index: built once in run_all (only when --use-cache is on) to
         # avoid paying for the meta.json scan when not needed. Keyed by
-        # (class_name, timeframe, timerange) → zip path. Cf.
-        # _build_export_index docstring for invalidation rules.
+        # (class_name, timeframe, timerange, pair) → zip path. The pair is
+        # essential — without it, per-pair zips for the same (class_name, tf)
+        # collide on the index and the cache returns one pair's results
+        # mislabeled as another's (silent corruption).
         self.use_cache: bool = bool(getattr(config, "use_cache", False))
-        self._export_index: Optional[Dict[Tuple[str, str, str], Path]] = None
+        self._export_index: Optional[Dict[Tuple[str, str, str, str], Path]] = None
         self.cache_hits: int = 0
 
         # Pool cache for live p-value computation during Phase 2 (so p-values
@@ -114,15 +116,17 @@ class BacktestRunner:
         safe_pair = pair.replace("/", "_").replace(":", "_")
         return f"{signal.name}_{safe_pair}_{timeframe}"
 
-    def _build_export_index(self) -> Dict[Tuple[str, str, str], Path]:
-        """Scan user_data/backtest_results/*.meta.json → {(class_name, timeframe, timerange): zip_path}.
+    def _build_export_index(self) -> Dict[Tuple[str, str, str, str], Path]:
+        """Scan user_data/backtest_results/*.meta.json → {(class_name, tf, timerange, pair): zip_path}.
 
-        We key on `(class_name, timeframe, timerange)` so a cached entry is only
-        reused when the strategy class AND the backtest window match. Stake /
-        wallet / max_open_trades changes don't invalidate (less critical for
-        relative ranking) — bump cache via `--force-fresh` if needed.
+        We key on `(class_name, timeframe, timerange, pair)` so a cached entry
+        is only reused when ALL of strategy class, backtest window, AND pair
+        match. The pair is read from inside each zip (meta.json doesn't carry
+        it). Without the pair in the key, per-pair zips collide and one pair's
+        result silently masquerades as another's. Stake / wallet / MOT changes
+        don't invalidate — bump cache via `--refresh` if needed.
         """
-        index: Dict[Tuple[str, str, str], Path] = {}
+        index: Dict[Tuple[str, str, str, str], Path] = {}
         timerange = self.config.timerange
         for meta_path in self.export_dir.glob("*.meta.json"):
             try:
@@ -154,8 +158,44 @@ class BacktestRunner:
                 # Only index if the timerange matches the current run's
                 if cached_range and cached_range != timerange:
                     continue
-                index[(class_name, tf, timerange)] = zip_path
+                pair = self._extract_pair_from_zip(zip_path, class_name)
+                if pair is None:
+                    # Can't disambiguate which pair this zip belongs to — skip
+                    # rather than risk a wrong cache hit. The strat will simply
+                    # re-run.
+                    continue
+                index[(class_name, tf, timerange, pair)] = zip_path
         return index
+
+    def _extract_pair_from_zip(self, zip_path: Path, class_name: str) -> Optional[str]:
+        """Read the first trade's pair from the freqtrade backtest zip.
+
+        Used to disambiguate per-pair zips that share a class_name. Falls back
+        to top-level `pairs` list when trades is empty. Returns None on any
+        I/O / parse error so the caller skips that zip.
+        """
+        try:
+            with zipfile.ZipFile(zip_path) as z:
+                inner = next(
+                    (n for n in z.namelist()
+                     if n.endswith(".json") and "_config" not in n),
+                    None,
+                )
+                if not inner:
+                    return None
+                data = json.loads(z.read(inner))
+            strat = (data.get("strategy") or {}).get(class_name) or {}
+            trades = strat.get("trades") or []
+            if trades:
+                p = trades[0].get("pair")
+                if p:
+                    return str(p)
+            pairs = data.get("pairs") or []
+            if pairs and isinstance(pairs, list):
+                return str(pairs[0])
+        except Exception:
+            return None
+        return None
 
     def _load_cached_result(self, class_name: str, zip_path: Path) -> Optional[Dict]:
         """Parse the inner backtest JSON from `zip_path` and return a result
@@ -321,11 +361,12 @@ class BacktestRunner:
         actual_tf = signal.timeframe_override or timeframe
 
         # Cache hit check — skip freqtrade entirely if a previous export
-        # for the same (class_name, tf, timerange) is on disk.
-        # The index is built once in run_all() before the worker pool starts
-        # to avoid race conditions / duplicate logs.
+        # for the same (class_name, tf, timerange, pair) is on disk.
+        # Pair MUST be in the key: per-pair zips share class_name + tf and
+        # would otherwise collide silently (returning one pair's results
+        # mislabeled as another's).
         if self.use_cache and self._export_index is not None:
-            cache_key = (class_name, actual_tf, self.config.timerange)
+            cache_key = (class_name, actual_tf, self.config.timerange, pair)
             zip_path = self._export_index.get(cache_key)
             if zip_path is not None:
                 cached = self._load_cached_result(class_name, zip_path)
