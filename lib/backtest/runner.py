@@ -114,6 +114,23 @@ class BacktestRunner:
         # diagnostic logs through `_phase1_log()` so prints don't drown the bar.
         self._phase1_pbar = None
 
+        # Counter lock — guards self.completed against the race where two
+        # workers read the same value, both add 1, both write the same result
+        # (lost increment → duplicate IDs in display). Cost: ~1-2 µs per
+        # acquire, negligible vs subprocess time.
+        self._counter_lock = threading.Lock()
+
+    def _bump_completed(self) -> int:
+        """Atomically increment self.completed and return the new value.
+
+        Worker threads must capture the returned id and pass it to
+        `_print_result(line_id=...)` to display their OWN id, not whatever
+        value `self.completed` happens to hold at print time.
+        """
+        with self._counter_lock:
+            self.completed += 1
+            return self.completed
+
     def _get_export_name(self, signal: SignalConfig, pair: str, timeframe: str) -> str:
         """Génère un nom de fichier unique pour l'export."""
         safe_pair = pair.replace("/", "_").replace(":", "_")
@@ -389,9 +406,9 @@ class BacktestRunner:
                     pv = self._live_pvalue_for_result(cached)
                     if pv is not None:
                         cached["p_value"] = pv
-                    self.completed += 1
+                    my_id = self._bump_completed()
                     self.cache_hits += 1
-                    self._print_result(cached)
+                    self._print_result(cached, line_id=my_id)
                     return cached
 
         export_name = self._get_export_name(signal, pair, actual_tf)
@@ -466,7 +483,7 @@ class BacktestRunner:
                 # rate-limit regex can false-match CCXT init logs → infinite
                 # retry loop on user Ctrl-C otherwise.
                 if result.returncode < 0:
-                    self.completed += 1
+                    self._bump_completed()
                     if signal.signal_type == "random_baseline" or self.debug:
                         sig_name = {-2: "SIGINT", -9: "SIGKILL", -15: "SIGTERM"}.get(
                             result.returncode, f"sig{-result.returncode}"
@@ -494,11 +511,11 @@ class BacktestRunner:
                         continue
                     else:
                         self._log_rate_limit_failed(signal.name)
-                        self.completed += 1
+                        self._bump_completed()
                         return None
 
-                # Success or other error
-                self.completed += 1
+                # Success or other error — capture our own id for the print path
+                my_id = self._bump_completed()
 
                 if self.debug:
                     self._debug_output(signal.name, result)
@@ -537,7 +554,7 @@ class BacktestRunner:
                     pv = self._live_pvalue_for_result(parsed)
                     if pv is not None:
                         parsed["p_value"] = pv
-                    self._print_result(parsed)
+                    self._print_result(parsed, line_id=my_id)
                     return parsed
 
                 # Silent-failure case: freqtrade ran (rc=0) but produced no
@@ -564,11 +581,11 @@ class BacktestRunner:
                     self.retries_total += 1
                     continue
                 else:
-                    self.completed += 1
+                    self._bump_completed()
                     return None
 
             except Exception as e:
-                self.completed += 1
+                self._bump_completed()
                 # ALWAYS log random_baseline exceptions (e.g., FileNotFoundError
                 # when freqtrade isn't on PATH). These failures cascade into
                 # 0 pools / 0 p-values, which is hard to diagnose without logs.
@@ -580,7 +597,7 @@ class BacktestRunner:
                         )
                 return None
 
-        self.completed += 1
+        self._bump_completed()
         return None
 
     def _calculate_delay(self, attempt: int) -> float:
@@ -1326,12 +1343,16 @@ class BacktestRunner:
                 f"p={pv_str}{marker} (adj={adj_str})"
             )
 
-    def _print_result(self, r: Dict):
-        """Print a single result line: trades L/S, WR L/S, PnL, DD + duration, Sharpe.
+    def _print_result(self, r: Dict, line_id: Optional[int] = None):
+        """Print a single result line: trades L/S, WR L/S, PnL, DD + duration, Calmar.
 
         Suppresses output for random_baseline pool builds — Phase 1 has its own
         tqdm bar; per-line 🎲 prints would drown out the bar and clutter the
         diagnostic. Failures still log via the dedicated paths.
+
+        `line_id` (when provided by the caller via `_bump_completed()`) lets
+        each worker display ITS OWN counter value instead of `self.completed`
+        which moves under concurrent workers (duplicate IDs in display).
         """
         if r.get("signal_type") == "random_baseline":
             return
@@ -1421,8 +1442,9 @@ class BacktestRunner:
             calmar_val = r.get("calmar", 0) or 0
             calmar_colored = color_calmar(calmar_val, f"{calmar_val:+6.2f}")
 
+            line_no = line_id if line_id is not None else self.completed
             print(
-                f"  {tag} [{self.completed:3d}/{self.total}] "
+                f"  {tag} [{line_no:3d}/{self.total}] "
                 f"{r['signal']:<35} {short_pair(r['pair']):<6} {r['timeframe']:<4} │ "
                 f"Tr={r['trades']:>4d} {ls_part} "
                 f"{wr_part} "
