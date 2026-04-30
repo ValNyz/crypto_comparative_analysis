@@ -202,8 +202,8 @@ Examples:
     parser.add_argument(
         "--null-pool-target-trades",
         type=int,
-        default=1000,
-        help="Target entries per pool run (default: 1000; adaptive per TF length)",
+        default=2000,
+        help="Target entries per pool run (default: 2000; adaptive per TF length)",
     )
     parser.add_argument(
         "--refresh-null-pool",

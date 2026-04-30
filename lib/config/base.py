@@ -79,7 +79,7 @@ class Config:
     # `--refresh-null-pool` explicitly to rebuild.
     enable_null_pool: bool = True
     null_pool_seed: int = 42
-    null_pool_target_trades: int = 1000  # entries emitted per pool run
+    null_pool_target_trades: int = 2000  # entries emitted per pool run
     null_pool_n_bootstrap: int = 1000
     # Equity fraction per trade in bootstrap. 0.10 matches stake=100 +
     # wallet=1000 (10% of capital per trade) so the bootstrap simulates
