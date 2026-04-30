@@ -21,6 +21,7 @@ import numpy as np
 from ..signals.base import SignalConfig
 from ..generation.generator import StrategyGenerator
 from ..utils.logging import print_lock
+from ..utils.colors import color_sharpe, color_dd, color_pvalue
 from ..utils.helpers import short_pair, sanitize_class_name
 from ..null_pool import (
     compute_cache_key,
@@ -1364,7 +1365,10 @@ class BacktestRunner:
             ls_part = f"({long_n:>3d}L/{short_n:>3d}S)"
             wr_part = f"WR={r['win_rate']:5.1f}%(L:{long_wr:>3.0f}%/S:{short_wr:>3.0f}%)"
             dd_dur = r.get("dd_duration_days", 0) or 0
-            dd_part = f"DD={r['max_dd_pct']:5.1f}%({dd_dur:>3.0f}d)"
+            # Color DD if low (good): <5% bold green, <10% green
+            dd_val = r["max_dd_pct"]
+            dd_colored = color_dd(dd_val, f"{dd_val:5.1f}%")
+            dd_part = f"DD={dd_colored}({dd_dur:>3.0f}d)"
             mkt = r.get("market_change_pct", 0) or 0
             mkt_part = f"MKT={mkt:+6.1f}%"
             pnl_l = r.get("profit_pct_long", 0) or 0
@@ -1392,7 +1396,8 @@ class BacktestRunner:
             else:
                 tag = "▶"
 
-            # Optional p-value suffix (only present in Phase 3 results)
+            # Optional p-value suffix (only present in Phase 3 results).
+            # Color: <0.01 bold green, <0.05 green.
             p_part = ""
             pv = r.get("p_value")
             if pv is not None and not (isinstance(pv, float) and pd.isna(pv)):
@@ -1402,7 +1407,11 @@ class BacktestRunner:
                     sig_marker = "•"
                 else:
                     sig_marker = " "
-                p_part = f" p={pv:.3f}{sig_marker}"
+                pv_colored = color_pvalue(pv, f"{pv:.3f}")
+                p_part = f" p={pv_colored}{sig_marker}"
+
+            # Color Sharpe: >=2 bold green, >=1 green.
+            sharpe_colored = color_sharpe(r['sharpe'], f"{r['sharpe']:+5.2f}")
 
             print(
                 f"  {tag} [{self.completed:3d}/{self.total}] "
@@ -1412,7 +1421,7 @@ class BacktestRunner:
                 f"{pnl_part} "
                 f"{mkt_part} "
                 f"{dd_part} "
-                f"SH={r['sharpe']:+5.2f}"
+                f"SH={sharpe_colored}"
                 f"{p_part}"
             )
 

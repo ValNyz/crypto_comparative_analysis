@@ -221,6 +221,14 @@ def expand_signal_template(
             stoploss = combo_dict.pop("_stoploss", stoploss_list[0])
             exit_config = combo_dict.pop("_exit", exit_list[0])
 
+            # Skip redundant trailing-vs-ROI combos: if the trailing arms at
+            # >= the immediate ROI threshold, the trade exits via ROI before
+            # trail can engage → identical results to `xnone`. No point
+            # backtesting these (saves time AND removes false redundancy in
+            # the rankings later). See _is_trail_redundant_with_roi.
+            if _is_trail_redundant_with_roi(exit_config, roi):
+                continue
+
             # Add remaining to params
             combo_params.update(combo_dict)
 
@@ -275,6 +283,66 @@ def expand_signal_template(
         signals.append(signal)
 
     return signals
+
+
+_EXIT_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+
+
+def _get_exit_obj(name: str):
+    """Lazy-load the exits.yaml entries for trailing-redundancy detection.
+
+    Cached after first call. Reads via get_all_exit_configs with a default
+    Config (the path is the same for all callers in practice).
+    """
+    global _EXIT_CONFIG_CACHE
+    if _EXIT_CONFIG_CACHE is None:
+        try:
+            from ..exits.registry import get_all_exit_configs
+            from ..config.base import Config
+            _EXIT_CONFIG_CACHE = get_all_exit_configs(Config())
+        except Exception:
+            _EXIT_CONFIG_CACHE = {}
+    return _EXIT_CONFIG_CACHE.get(name)
+
+
+def _is_trail_redundant_with_roi(exit_config: str, roi) -> bool:
+    """True when `trail_activate_pct >= immediate ROI` → trail can never fire.
+
+    The trade exits via ROI at +R% before the trail arms at +A% (>= R). The
+    backtest result is mathematically identical to the same combo with no
+    trail. Skipping these combos avoids ~20-30% useless backtests in dense
+    grids, and removes spurious "duplicate stats across exit variants" rows
+    from the rankings.
+    """
+    if not exit_config or exit_config == "none":
+        return False
+    cfg = _get_exit_obj(exit_config)
+    if cfg is None or not getattr(cfg, "use_trailing_roi", False):
+        return False
+    activate = float(getattr(cfg, "trail_activate_pct", 0) or 0)
+    if activate <= 0:
+        return False
+    # Determine the immediate ROI threshold (key 0 / "0").
+    if isinstance(roi, dict):
+        if not roi:
+            return False
+        # Try numeric 0 first, then string "0", then the smallest key.
+        roi_imm = roi.get(0, roi.get("0"))
+        if roi_imm is None:
+            try:
+                first_key = sorted(roi.keys(), key=lambda k: float(k))[0]
+                roi_imm = roi[first_key]
+            except (TypeError, ValueError):
+                return False
+    else:
+        roi_imm = roi
+    try:
+        roi_val = float(roi_imm)
+    except (TypeError, ValueError):
+        return False
+    if roi_val <= 0:
+        return False
+    return activate >= roi_val
 
 
 def _short_exit_name(exit_config: str) -> str:

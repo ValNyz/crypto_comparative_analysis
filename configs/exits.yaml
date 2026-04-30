@@ -299,7 +299,17 @@ exits:
     trail_activate_pct: 0.010
     trail_distance_pct: 0.008
 
-  # Design 4 — Recommended defaults post-bugfix (arm at +1%, 0.5% giveback)
+  # Design 4 — Recommended defaults post-bugfix (arm at +1%, 0.5% giveback).
+  # Renamed from `trailing_roi_fixed` for naming consistency with `_2_1` etc.
+  # Read: trailing_roi_<activate>_<distance>, both in percent, decimal as `_`.
+  trailing_roi_1_05:
+    use_trailing_roi: true
+    trail_activate_pct: 0.010
+    trail_distance_pct: 0.005
+
+  # Deprecated alias — kept so existing cached zips with class names like
+  # `S_*_xtr_fixed_*` still match. Migrate YAML configs to `trailing_roi_1_05`
+  # at your own pace ; new runs should use the new name.
   trailing_roi_fixed:
     use_trailing_roi: true
     trail_activate_pct: 0.010
