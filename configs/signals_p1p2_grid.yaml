@@ -31,11 +31,11 @@ funding_baseline:
     direction: both
     params:
       zscore: [1.5, 2.0, 3.0]
-      lookback: [168, 336]
+      lookback: [336, 720]
     roi:
       - { "0": 0.02 }
       - { "0": 0.05 }
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05, -0.08]
     exit_config: [none, trailing_roi_1_05, trailing_roi_2_1]
     # = 3 × 2 × 2 × 2 × 3 = 72 strats
 
@@ -50,7 +50,7 @@ funding_macro_btc:
     roi:
       - { "0": 0.02 }
       - { "0": 0.05 }
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05, -0.08]
     exit_config: [none, trailing_roi_2_1]
     # = 2 × 2 × 2 × 2 = 16 strats
 
@@ -63,8 +63,10 @@ funding_macro_fng:
       use_fng: true
       fng_fear: [25, 20]
       fng_consec: [3]
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    roi:
+      - { "0": 0.02 }
+      - { "0": 0.05 }
+    stoploss: [-0.03, -0.05, -0.08]
     exit_config: [none, trailing_roi_1_05]
     # = 2 × 2 × 1 × 2 × 2 = 16 strats
 
@@ -77,8 +79,10 @@ funding_macro_etf:
       use_etf_flow: true
       etf_ref: btc
       etf_inflow_min_long: [200, 300]
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05]
+    roi:
+      - { "0": 0.02 }
+      - { "0": 0.05 }
+    stoploss: [-0.03, -0.05, -0.08]
     exit_config: [none, trailing_roi_1_05]
     # = 2 × 2 = 4 strats
 
@@ -90,8 +94,10 @@ funding_macro_vix:
       zscore: [1.5]
       use_vix: true
       vix_max_long: [25, 30]
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05]
+    roi:
+      - { "0": 0.02 }
+      - { "0": 0.05 }
+    stoploss: [-0.03, -0.05, -0.08]
     exit_config: [none, trailing_roi_1_05]
     # = 2 × 2 = 4 strats
 
@@ -101,8 +107,10 @@ funding_mode_flip:
     direction: both
     params:
       funding_mode: flip
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    roi:
+      - { "0": 0.02 }
+      - { "0": 0.05 }
+    stoploss: [-0.03, -0.05, -0.08]
     exit_config: [none, trailing_roi_1_05, trailing_roi_2_1]
     # = 2 × 3 = 6 strats
   - name: "fflip_fng_f{fng_fear}"
@@ -125,7 +133,7 @@ funding_mode_cum7d:
       funding_mode: cum_7d
       zscore: [1.5, 2.0]
     roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05]
     exit_config: [none, trailing_roi_1_05]
     # = 2 × 2 × 2 = 8 strats
 
@@ -135,15 +143,19 @@ technical_signals:
   - name: "trig_bear_climax_long"
     signal_type: bear_climax
     direction: long
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    roi:
+      - { "0": 0.02 }
+      - { "0": 0.05 }
+    stoploss: [-0.03, -0.05, -0.08]
     exit_config: [none, trailing_roi_1_05, trailing_roi_2_1]
     # = 3 × 3 = 9 strats
   - name: "trig_bull_climax_short"
     signal_type: bull_climax
     direction: short
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    roi:
+      - { "0": 0.02 }
+      - { "0": 0.05 }
+    stoploss: [-0.03, -0.05, -0.08]
     exit_config: [none, trailing_roi_1_05, trailing_roi_2_1]
     # = 3 × 3 = 9 strats
 
@@ -153,8 +165,10 @@ technical_signals:
     direction: long
     params:
       vwap_zscore_threshold: [2.0, 2.5]
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    roi:
+      - { "0": 0.02 }
+      - { "0": 0.05 }
+    stoploss: [-0.03, -0.05, -0.08]
     exit_config: [none, trailing_roi_1_05, trailing_roi_2_1]
     # = 2 × 3 × 3 = 18 strats
   - name: "trig_vwapz_short_z{vwap_zscore_threshold}"
@@ -162,8 +176,10 @@ technical_signals:
     direction: short
     params:
       vwap_zscore_threshold: [2.0, 2.5]
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    roi:
+      - { "0": 0.02 }
+      - { "0": 0.05 }
+    stoploss: [-0.03, -0.05, -0.08]
     exit_config: [none, trailing_roi_1_05]
     # = 2 × 2 × 2 = 8 strats
 
@@ -174,30 +190,30 @@ technical_signals:
     params:
       zscore: [2.0]
     roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05]
     exit_config: [none, trailing_roi_1_05]
     # = 2 × 2 = 4
-  - name: "trig_rbtc_extreme_short"
-    signal_type: ratio_btc_extreme
-    direction: short
-    params:
-      zscore: [2.0]
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_1_05]
+  # - name: "trig_rbtc_extreme_short"
+  #   signal_type: ratio_btc_extreme
+  #   direction: short
+  #   params:
+  #     zscore: [2.0]
+  #   roi: [{ "0": 0.02 }]
+  #   stoploss: [-0.03, -0.05, -0.10]
+  #   exit_config: [none, trailing_roi_1_05]
     # = 4
   - name: "trig_rbtc_breakout_long"
     signal_type: ratio_btc_breakout
     direction: long
     roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05]
     exit_config: [none, trailing_roi_2_1]
     # = 4
   - name: "trig_rbtc_breakout_short"
     signal_type: ratio_btc_breakout
     direction: short
     roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05]
     exit_config: [none, trailing_roi_2_1]
     # = 4
 
@@ -208,46 +224,50 @@ technical_signals:
     params:
       zscore: [2.0]
     roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05]
     exit_config: [none, trailing_roi_1_05]
     # = 4
-  - name: "trig_reth_extreme_short"
-    signal_type: ratio_eth_extreme
-    direction: short
-    params:
-      zscore: [2.0]
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_1_05]
+  # - name: "trig_reth_extreme_short"
+  #   signal_type: ratio_eth_extreme
+  #   direction: short
+  #   params:
+  #     zscore: [2.0]
+  #   roi: [{ "0": 0.02 }]
+  #   stoploss: [-0.03, -0.05, -0.10]
+  #   exit_config: [none, trailing_roi_1_05]
     # = 4
   - name: "trig_reth_breakout_long"
     signal_type: ratio_eth_breakout
     direction: long
     roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05]
     exit_config: [none, trailing_roi_2_1]
     # = 4
-  - name: "trig_reth_breakout_short"
-    signal_type: ratio_eth_breakout
-    direction: short
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_2_1]
+  # - name: "trig_reth_breakout_short"
+  #   signal_type: ratio_eth_breakout
+  #   direction: short
+  #   roi: [{ "0": 0.02 }]
+  #   stoploss: [-0.03, -0.05, -0.10]
+  #   exit_config: [none, trailing_roi_2_1]
     # = 4
 
   # Ichimoku Kumo cross
   - name: "trig_kumo_long"
     signal_type: ichimoku_kumo
     direction: long
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    roi:
+      - { "0": 0.02 }
+      - { "0": 0.05 }
+    stoploss: [-0.03, -0.05, -0.08]
     exit_config: [none, trailing_roi_2_1]
     # = 4
   - name: "trig_kumo_short"
     signal_type: ichimoku_kumo
     direction: short
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    roi:
+      - { "0": 0.02 }
+      - { "0": 0.05 }
+    stoploss: [-0.03, -0.05, -0.08]
     exit_config: [none, trailing_roi_2_1]
     # = 4
 
@@ -256,14 +276,14 @@ technical_signals:
     signal_type: trend_weakening
     direction: long
     roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05]
     exit_config: [none, trailing_roi_1_05]
     # = 4
   - name: "trig_trendweak_short"
     signal_type: trend_weakening
     direction: short
     roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05]
     exit_config: [none, trailing_roi_1_05]
     # = 4
 
@@ -276,7 +296,7 @@ combo_signals:
       signals: [rsi_os, ratio_btc_low]
       min_signals: 2
     roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05]
     exit_config: [none, trailing_roi_1_05]
     # = 4
   - name: "combo_rsi_ob_x_ratio_btc_high"
@@ -286,28 +306,28 @@ combo_signals:
       signals: [rsi_ob, ratio_btc_high]
       min_signals: 2
     roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05]
     exit_config: [none, trailing_roi_1_05]
     # = 4
-  - name: "combo_kumo_bull_x_vwap_oversold"
-    signal_type: combo
-    direction: long
-    params:
-      signals: [kumo_bull_cross, vwap_oversold]
-      min_signals: 2
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_2_1]
+  # - name: "combo_kumo_bull_x_vwap_oversold"
+  #   signal_type: combo
+  #   direction: long
+  #   params:
+  #     signals: [kumo_bull_cross, vwap_oversold]
+  #     min_signals: 2
+  #   roi: [{ "0": 0.02 }]
+  #   stoploss: [-0.03, -0.05, -0.10]
+  #   exit_config: [none, trailing_roi_2_1]
     # = 4
-  - name: "combo_kumo_bear_x_vwap_ob"
-    signal_type: combo
-    direction: short
-    params:
-      signals: [kumo_bear_cross, vwap_overbought]
-      min_signals: 2
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_2_1]
+  # - name: "combo_kumo_bear_x_vwap_ob"
+  #   signal_type: combo
+  #   direction: short
+  #   params:
+  #     signals: [kumo_bear_cross, vwap_overbought]
+  #     min_signals: 2
+  #   roi: [{ "0": 0.02 }]
+  #   stoploss: [-0.03, -0.05, -0.10]
+  #   exit_config: [none, trailing_roi_2_1]
     # = 4
   - name: "combo_bb_low_x_bear_climax"
     signal_type: combo
@@ -316,7 +336,7 @@ combo_signals:
       signals: [bb_low, bear_climax]
       min_signals: 2
     roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05]
     exit_config: [none, trailing_roi_2_1]
     # = 4
   - name: "combo_bb_high_x_bull_climax"
@@ -326,18 +346,18 @@ combo_signals:
       signals: [bb_high, bull_climax]
       min_signals: 2
     roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05]
     exit_config: [none, trailing_roi_2_1]
     # = 4
-  - name: "combo_kumo_bear_x_ratio_btc_breakout_down"
-    signal_type: combo
-    direction: short
-    params:
-      signals: [kumo_bear_cross, ratio_btc_breakout_down]
-      min_signals: 2
-    roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_2_1]
+  # - name: "combo_kumo_bear_x_ratio_btc_breakout_down"
+  #   signal_type: combo
+  #   direction: short
+  #   params:
+  #     signals: [kumo_bear_cross, ratio_btc_breakout_down]
+  #     min_signals: 2
+  #   roi: [{ "0": 0.02 }]
+  #   stoploss: [-0.03, -0.05, -0.10]
+  #   exit_config: [none, trailing_roi_2_1]
     # = 4
   - name: "combo_macd_neg_x_ratio_eth_breakout_down"
     signal_type: combo
@@ -346,6 +366,6 @@ combo_signals:
       signals: [macd_negative, ratio_eth_breakout_down]
       min_signals: 2
     roi: [{ "0": 0.02 }]
-    stoploss: [-0.03, -0.05, -0.10]
+    stoploss: [-0.03, -0.05]
     exit_config: [none, trailing_roi_1_05]
     # = 4
