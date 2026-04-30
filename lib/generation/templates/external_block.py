@@ -30,10 +30,17 @@ EXTERNAL_LOADERS_BLOCK = '''
         return df.sort_values("timestamp").reset_index(drop=True)
 
     def _align_to_dataframe_tz(self, df: pd.DataFrame, reference_df: pd.DataFrame) -> pd.DataFrame:
-        """Convert df['timestamp'] tz to match reference_df['date'] tz, return rename'd."""
+        """Convert df['timestamp'] tz AND precision to match reference_df['date'].
+
+        merge_asof in recent pandas versions rejects datetime keys with mismatched
+        precision (e.g., datetime64[ns, UTC] vs datetime64[us, UTC]) — the OHLCV
+        feather is typically ns while parquet external data may be us. Align
+        explicitly to avoid `incompatible merge keys` errors.
+        """
         if df.empty:
             return df
-        ref_tz = reference_df["date"].dt.tz
+        ref_col = reference_df["date"]
+        ref_tz = ref_col.dt.tz
         out = df.copy()
         if ref_tz is not None:
             if out["timestamp"].dt.tz is None:
@@ -43,6 +50,12 @@ EXTERNAL_LOADERS_BLOCK = '''
         else:
             if out["timestamp"].dt.tz is not None:
                 out["timestamp"] = out["timestamp"].dt.tz_localize(None)
+        # Match precision (ns/us/ms) to reference — fixes pandas MergeError on
+        # datetime64[ns, UTC] vs datetime64[us, UTC] mismatch.
+        try:
+            out["timestamp"] = out["timestamp"].astype(ref_col.dtype)
+        except (TypeError, ValueError):
+            pass
         return out.rename(columns={{"timestamp": "date"}})
 
     def merge_external_fng(self, dataframe: pd.DataFrame) -> pd.DataFrame:
