@@ -31,11 +31,15 @@ def generate_entry_logic(
     condition = _get_signal_condition(signal)
     entry_col = "enter_long" if signal.direction == "long" else "enter_short"
 
+    # Tag layout: <name>_<direction>_<regime>. Direction must be CONTIGUOUS
+    # with the regime suffix because the parser regex matches
+    # `(long|short)_(bull|bear|range|volatile)` as adjacent tokens
+    # (lib/backtest/parser.py:160).
     return f"""{indent}base_cond = {condition} & regime_ok
 {indent}for reg in self.ALLOWED_REGIMES:
 {indent}    mask = base_cond & (regime == reg)
 {indent}    dataframe.loc[mask, '{entry_col}'] = 1
-{indent}    dataframe.loc[mask, 'enter_tag'] = f'{signal.name}_{{reg}}'"""
+{indent}    dataframe.loc[mask, 'enter_tag'] = f'{signal.name}_{signal.direction}_{{reg}}'"""
 
 
 def _get_signal_condition(signal: SignalConfig) -> str:
@@ -393,4 +397,4 @@ def _generate_combo_logic(signal: SignalConfig, indent: str, config: Config) -> 
 {indent}for reg in ['bull', 'bear', 'range', 'volatile']:
 {indent}    mask = base_cond & (regime == reg)
 {indent}    dataframe.loc[mask, '{entry_col}'] = 1
-{indent}    dataframe.loc[mask, 'enter_tag'] = f'{signal.name}_{{reg}}'"""
+{indent}    dataframe.loc[mask, 'enter_tag'] = f'{signal.name}_{signal.direction}_{{reg}}'"""

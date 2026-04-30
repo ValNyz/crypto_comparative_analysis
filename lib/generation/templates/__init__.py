@@ -8,6 +8,7 @@ from .standard import STRATEGY_TEMPLATE_STANDARD
 from .funding import STRATEGY_TEMPLATE_FUNDING
 from .external_block import EXTERNAL_LOADERS_BLOCK
 from .cross_coin_block import CROSS_COIN_LOADERS_BLOCK
+from .random_baseline import STRATEGY_TEMPLATE_RANDOM_BASELINE
 
 __all__ = [
     "INDICATORS_BLOCK",
@@ -16,4 +17,5 @@ __all__ = [
     "STRATEGY_TEMPLATE_FUNDING",
     "EXTERNAL_LOADERS_BLOCK",
     "CROSS_COIN_LOADERS_BLOCK",
+    "STRATEGY_TEMPLATE_RANDOM_BASELINE",
 ]

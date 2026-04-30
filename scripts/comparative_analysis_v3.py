@@ -181,6 +181,25 @@ Examples:
             "data and need fresh results."
         ),
     )
+    # Null-pool comparison (always-on; tunable via these knobs)
+    parser.add_argument(
+        "--null-pool-seed",
+        type=int,
+        default=42,
+        help="RNG seed for random-baseline entries (default: 42, also used in bootstrap)",
+    )
+    parser.add_argument(
+        "--null-pool-target-trades",
+        type=int,
+        default=2000,
+        help="Target entries per pool run (default: 2000; adaptive per TF length)",
+    )
+    parser.add_argument(
+        "--refresh-null-pool",
+        action="store_true",
+        help="Force rebuild of parquet pool cache (keeps freqtrade signal cache)",
+    )
+
     parser.add_argument(
         "--list",
         "-l",
@@ -210,6 +229,9 @@ def main():
     config.debug = args.debug
     config.use_cache = not args.refresh
     config.enable_regime_filter = args.enable_filter
+    config.null_pool_seed = args.null_pool_seed
+    config.null_pool_target_trades = args.null_pool_target_trades
+    config.refresh_null_pool = args.refresh_null_pool
     config.regime_lookback = args.regime_lookback
     config.regime_adx_threshold = args.adx_threshold
     config.configs_dir = args.configs_dir
@@ -326,14 +348,75 @@ def _run_rolling(config, signals, pairs, args):
 
 
 def _save_standard_results(df, config, args):
-    """Sauvegarde les résultats standard."""
+    """Sauvegarde les résultats standard.
+
+    Writes three CSVs side-by-side:
+      • v3_standard_TS.csv  — full results (every column, including
+                              p_value/p_value_adj when null pool ran)
+      • v3_winners_TS.csv   — only FDR-significant rows (p_adj < 0.05),
+                              sorted by p_adj asc + Sharpe desc, key cols only
+      • v3_monthly_TS.csv   — long-form monthly stats: one row per
+                              (signal, pair, tf, month_idx) with profit,
+                              trades, profit_factor, win_rate
+    """
+    import pandas as pd
+
     if df is None or len(df) == 0:
         return
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     csv_path = args.output or config.output_dir / f"v3_standard_{ts}.csv"
+    base = str(csv_path).replace(".csv", "")
+
     df.to_csv(csv_path, index=False)
-    print(f"\n📁 Résultats: {csv_path}")
+    print(f"\n📁 Résultats:")
+    print(f"   • {csv_path}  ({len(df)} rows × {len(df.columns)} cols)")
+
+    # Winners CSV: FDR-significant only, key columns
+    if "p_value_adj" in df.columns:
+        winners = df[df["p_value_adj"].notna() & (df["p_value_adj"] < 0.05)].copy()
+        if len(winners) > 0:
+            winners = winners.sort_values(
+                ["p_value_adj", "sharpe"], ascending=[True, False]
+            )
+            keep_cols = [
+                c for c in (
+                    "signal", "signal_type", "direction", "pair", "timeframe",
+                    "exit_config", "stoploss", "roi", "trades", "win_rate",
+                    "profit_pct", "profit_pct_long", "profit_pct_short",
+                    "sharpe", "max_dd_pct", "dd_duration_days",
+                    "market_change_pct", "consistency", "p_value", "p_value_adj",
+                )
+                if c in winners.columns
+            ]
+            wpath = f"{base}_winners.csv"
+            winners[keep_cols].to_csv(wpath, index=False)
+            print(f"   • {wpath}  ({len(winners)} FDR-significant rows)")
+
+    # Monthly long-form CSV: explode monthly_* lists into one row per month.
+    if "monthly_profits" in df.columns:
+        rows = []
+        for _, r in df.iterrows():
+            mp = r.get("monthly_profits") or []
+            mt = r.get("monthly_trades") or []
+            mpf = r.get("monthly_pf") or []
+            mwr = r.get("monthly_wr") or []
+            for i, profit in enumerate(mp):
+                rows.append({
+                    "signal": r.get("signal"),
+                    "pair": r.get("pair"),
+                    "timeframe": r.get("timeframe"),
+                    "exit_config": r.get("exit_config"),
+                    "month_idx": i + 1,
+                    "profit_abs": profit,
+                    "trades": mt[i] if i < len(mt) else None,
+                    "profit_factor": mpf[i] if i < len(mpf) else None,
+                    "win_rate": mwr[i] if i < len(mwr) else None,
+                })
+        if rows:
+            mpath = f"{base}_monthly.csv"
+            pd.DataFrame(rows).to_csv(mpath, index=False)
+            print(f"   • {mpath}  ({len(rows)} monthly rows)")
 
 
 def _save_rolling_results(consistency_df, raw_df, config, args):

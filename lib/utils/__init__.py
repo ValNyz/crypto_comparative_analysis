@@ -4,7 +4,7 @@
 """Utility functions and helpers."""
 
 from .logging import print_lock, safe_print, print_progress
-from .helpers import get_allowed_regimes, sanitize_class_name
+from .helpers import get_allowed_regimes, sanitize_class_name, short_pair
 
 __all__ = [
     "print_lock",
@@ -12,4 +12,5 @@ __all__ = [
     "print_progress",
     "get_allowed_regimes",
     "sanitize_class_name",
+    "short_pair",
 ]

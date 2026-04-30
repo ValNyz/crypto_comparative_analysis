@@ -7,6 +7,7 @@ import pandas as pd
 from typing import Optional
 from ...config.base import Config
 from ..formatters import print_header, print_section
+from ...utils.helpers import short_pair
 
 
 def print_recommendations(df: pd.DataFrame, config: Optional[Config] = None):
@@ -42,7 +43,7 @@ def _print_balanced_recommendations(df: pd.DataFrame):
         for i, (_, r) in enumerate(best_balanced.iterrows(), 1):
             avg_m = r.get("avg_month", 0)
             print(
-                f"     {i}. {r['signal']:<26} ({r['pair']}, {r['timeframe']})\n"
+                f"     {i}. {r['signal']:<26} ({short_pair(r['pair'])}, {r['timeframe']})\n"
                 f"        Sharpe={r['sharpe']:+.2f} │ Consistance={r['consistency']:.0f}% │ "
                 f"DD={r['max_dd_pct']:.1f}% │ PnL={r['profit_pct']:+.1f}% │ Avg/mois={avg_m:+.1f} USDC\n"
             )

@@ -6,6 +6,7 @@
 import json
 import subprocess
 import time
+import threading
 import zipfile
 
 import re
@@ -15,10 +16,21 @@ from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
+import numpy as np
 
 from ..signals.base import SignalConfig
 from ..generation.generator import StrategyGenerator
 from ..utils.logging import print_lock
+from ..utils.helpers import short_pair, sanitize_class_name
+from ..null_pool import (
+    compute_cache_key,
+    load_pool,
+    save_pool,
+    extract_trades_from_zip,
+    pvalue_vs_null,
+    pvalue_vs_null_mixed,
+    bh_adjusted_pvalues,
+)
 from .parser import parse_freqtrade_output
 
 # Patterns d'erreurs de rate limiting à détecter
@@ -86,6 +98,12 @@ class BacktestRunner:
         self.use_cache: bool = bool(getattr(config, "use_cache", False))
         self._export_index: Optional[Dict[Tuple[str, str, str], Path]] = None
         self.cache_hits: int = 0
+
+        # Pool cache for live p-value computation during Phase 2 (so p-values
+        # can show on the per-line print, not only in the Phase 3 summary).
+        # Keyed by cache_key str → DataFrame or None (negative cache).
+        self._live_pool_cache: Dict[str, Optional[pd.DataFrame]] = {}
+        self._live_pool_lock = threading.Lock()
 
     def _get_export_name(self, signal: SignalConfig, pair: str, timeframe: str) -> str:
         """Génère un nom de fichier unique pour l'export."""
@@ -316,8 +334,13 @@ class BacktestRunner:
                         "timeframe": actual_tf,
                         "allowed_regimes": signal.allowed_regimes,
                         "exit_config": signal.exit_config,
+                        "stoploss": signal.stoploss,
+                        "roi": json.dumps(signal.roi, sort_keys=True),
                         "_cached": True,
                     })
+                    pv = self._live_pvalue_for_result(cached)
+                    if pv is not None:
+                        cached["p_value"] = pv
                     self.completed += 1
                     self.cache_hits += 1
                     self._print_result(cached)
@@ -355,8 +378,13 @@ class BacktestRunner:
             "trades",
             "--export-filename",
             export_name,
+            # Pool runs override max_open_trades to maximize trade density.
+            # Each random entry should be taken (no capital throttling) so the
+            # pool grows from ~192 trades to 1500-2500. The bootstrap layer
+            # then re-applies `null_pool_capital_pct` to simulate the user's
+            # actual allocation when scoring observed strategies.
             "--max-open-trades",
-            str(self.config.max_open_trades),
+            str(999 if signal.signal_type == "random_baseline" else self.config.max_open_trades),
             "--breakdown",
             "month",
         ]
@@ -412,8 +440,13 @@ class BacktestRunner:
                             "timeframe": actual_tf,
                             "allowed_regimes": signal.allowed_regimes,
                             "exit_config": signal.exit_config,
+                            "stoploss": signal.stoploss,
+                            "roi": json.dumps(signal.roi, sort_keys=True),
                         }
                     )
+                    pv = self._live_pvalue_for_result(parsed)
+                    if pv is not None:
+                        parsed["p_value"] = pv
                     self._print_result(parsed)
                     return parsed
 
@@ -486,6 +519,430 @@ class BacktestRunner:
                 f"attente {delay:.0f}s..."
             )
 
+    # ============================================================
+    # === Null-pool phases ===
+    # ============================================================
+
+    # Pool dims: (pair, tf, exit_config, direction). Exit logic dramatically
+    # changes per-trade return distribution (trailing vs fixed vs none) so it
+    # MUST be a pool dim. SL/ROI are held neutral within each cell — minor
+    # variations don't shift the distribution enough to justify exploding
+    # the pool count. Net pool count for a typical grid:
+    # 6 pairs × 3 TFs × ~3 exits × 2 directions = ~108 pools.
+    NULL_POOL_NEUTRAL_SL: float = -0.05
+    NULL_POOL_NEUTRAL_ROI: Dict[str, float] = {"0": 0.02}
+
+    def _null_pool_cells(
+        self,
+        signals: List[SignalConfig],
+        pairs: List[str],
+        timeframes: List[str],
+    ) -> List[Tuple[str, str, str, str]]:
+        """Distinct (pair, tf, exit_config, direction) cells."""
+        base: set = set()
+        for sig in signals:
+            tfs = (
+                [sig.timeframe_override] if sig.timeframe_override else timeframes
+            )
+            for pair in pairs:
+                for tf in tfs:
+                    base.add((pair, tf, sig.exit_config))
+        cells = []
+        for pair, tf, exit_cfg in sorted(base):
+            for direction in ("long", "short"):
+                cells.append((pair, tf, exit_cfg, direction))
+        return cells
+
+    def _synthesize_pool_signal(
+        self, exit_cfg: str, direction: str
+    ) -> SignalConfig:
+        """Build the SignalConfig for a null-pool run on a given exit config."""
+        seed = int(self.config.null_pool_seed)
+        dir_short = {"long": "L", "short": "S", "both": "B"}.get(direction, "B")
+        # Class-name uniqueness: encode exit + direction so each cell maps
+        # to a distinct freqtrade strategy file / cached export.
+        name = f"random_baseline_seed{seed}_{exit_cfg}_dir{dir_short}"
+        return SignalConfig(
+            name=name,
+            signal_type="random_baseline",
+            direction=direction,
+            params={
+                "seed": seed,
+                "target_trades": int(self.config.null_pool_target_trades),
+            },
+            roi=dict(self.NULL_POOL_NEUTRAL_ROI),
+            stoploss=float(self.NULL_POOL_NEUTRAL_SL),
+            exit_config=exit_cfg,
+            allowed_regimes=["bull", "bear", "range", "volatile"],
+        )
+
+    def _find_pool_export_zip(
+        self, class_name: str, since: float
+    ) -> Optional[Path]:
+        """Locate the freshly-written export zip containing `class_name`.
+
+        Scans only zips with mtime >= since to avoid expensive full scans.
+        Returns the first match or None.
+        """
+        candidates = sorted(
+            (p for p in self.export_dir.glob("*.zip") if p.stat().st_mtime >= since),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for zp in candidates:
+            try:
+                with zipfile.ZipFile(zp) as z:
+                    inner = next(
+                        (
+                            n
+                            for n in z.namelist()
+                            if n.endswith(".json") and "_config" not in n
+                        ),
+                        None,
+                    )
+                    if not inner:
+                        continue
+                    data = json.loads(z.read(inner))
+                if class_name in (data.get("strategy") or {}):
+                    return zp
+            except Exception:
+                continue
+        return None
+
+    def _build_null_pool_for_cell(
+        self,
+        cell: Tuple[str, str, str, str],
+    ) -> bool:
+        """Build (or reuse) the null pool for a single cell.
+
+        Returns True on cache hit / successful build, False on failure.
+        """
+        pair, tf, exit_cfg, direction = cell
+        cache_key = compute_cache_key(
+            pair, tf, exit_cfg,
+            self.NULL_POOL_NEUTRAL_SL,
+            self.NULL_POOL_NEUTRAL_ROI,
+            self.config.timerange, int(self.config.null_pool_seed),
+            direction=direction,
+        )
+        cache_dir = self.config.null_pool_cache_dir
+
+        if not self.config.refresh_null_pool:
+            existing = load_pool(cache_key, cache_dir)
+            if existing is not None and len(existing) >= 50:
+                return True
+
+        pool_sig = self._synthesize_pool_signal(exit_cfg, direction)
+        # The strategy generator will build class name as S_<sanitized_name>_<tf>
+        class_name = f"S_{sanitize_class_name(pool_sig.name)}_{tf}"
+        t_start = time.time() - 1.0  # 1s slack for fs mtime granularity
+
+        result = self.run_single(pool_sig, pair, tf)
+        if result is None:
+            return False
+
+        # Find the export zip, extract trades, save parquet
+        zp = self._find_pool_export_zip(class_name, since=t_start)
+        if zp is None:
+            # Fallback: rebuild full export index and lookup
+            self._export_index = self._build_export_index()
+            zp = self._export_index.get((class_name, tf, self.config.timerange))
+        if zp is None:
+            return False
+
+        df = extract_trades_from_zip(zp, class_name)
+        if df is None or len(df) < 50:
+            return False
+        save_pool(df, cache_key, cache_dir)
+        return True
+
+    def _build_null_pools_phase(
+        self,
+        signals: List[SignalConfig],
+        pairs: List[str],
+        timeframes: List[str],
+    ) -> None:
+        """Phase 1: ensure every (pair, tf, exit, sl, roi) cell has a null pool."""
+        cells = self._null_pool_cells(signals, pairs, timeframes)
+        if not cells:
+            return
+
+        cache_dir = self.config.null_pool_cache_dir
+        seed = int(self.config.null_pool_seed)
+        n_cached = 0
+        if not self.config.refresh_null_pool:
+            for c in cells:
+                pair, tf, exit_cfg, direction = c
+                key = compute_cache_key(
+                    pair, tf, exit_cfg,
+                    self.NULL_POOL_NEUTRAL_SL,
+                    self.NULL_POOL_NEUTRAL_ROI,
+                    self.config.timerange, seed, direction=direction,
+                )
+                if (cache_dir / f"{key}.parquet").exists():
+                    n_cached += 1
+
+        with print_lock:
+            print(f"\n{'=' * 100}")
+            print(
+                f"🎲 PHASE 1 — Null pool builder: {len(cells)} cells "
+                f"({n_cached} cached, {len(cells) - n_cached} to build, seed={seed}, "
+                f"target={self.config.null_pool_target_trades} trades)"
+            )
+            print(f"{'=' * 100}\n")
+
+        # Build missing pools (parallel, like run_all). Each cell synthesizes
+        # a distinct random_baseline strategy so threads don't collide.
+        # Pre-flight: pre-build the export index if not already done so the
+        # cache lookup inside run_single sees the fresh state.
+        if self.use_cache and self._export_index is None:
+            self._export_index = self._build_export_index()
+
+        cells_to_run = cells if self.config.refresh_null_pool else [
+            c for c in cells
+            if not (cache_dir / (
+                compute_cache_key(
+                    c[0], c[1], c[2],
+                    self.NULL_POOL_NEUTRAL_SL,
+                    self.NULL_POOL_NEUTRAL_ROI,
+                    self.config.timerange, seed, direction=c[3],
+                ) + ".parquet"
+            )).exists()
+        ]
+        # Save & restore total/completed so phase 1 progress doesn't leak into phase 2
+        saved_total, saved_completed = self.total, self.completed
+        self.total = len(cells_to_run)
+        self.completed = 0
+
+        n_built = 0
+        if cells_to_run:
+            try:
+                from tqdm.auto import tqdm
+            except ImportError:
+                tqdm = None
+            with ThreadPoolExecutor(max_workers=self.config.max_workers) as ex:
+                futures = {
+                    ex.submit(self._build_null_pool_for_cell, c): c
+                    for c in cells_to_run
+                }
+                # tqdm.auto picks the right backend (notebook vs terminal). It
+                # leaves the bar pinned at the bottom; per-line prints from
+                # _print_result push it up but tqdm redraws on each update.
+                iterator = (
+                    tqdm(
+                        as_completed(futures),
+                        total=len(cells_to_run),
+                        desc="🎲 Pool builds",
+                        unit="cell",
+                        smoothing=0.1,
+                        dynamic_ncols=True,
+                    )
+                    if tqdm is not None
+                    else as_completed(futures)
+                )
+                for f in iterator:
+                    if f.result():
+                        n_built += 1
+
+        self.total, self.completed = saved_total, saved_completed
+        with print_lock:
+            print(
+                f"\n🎲 Pool cache: {n_cached} hits + {n_built} built / {len(cells)} cells\n"
+            )
+
+    def _load_pool_cached(
+        self, cache_key: str
+    ) -> Optional[pd.DataFrame]:
+        """Thread-safe pool load with negative cache."""
+        with self._live_pool_lock:
+            if cache_key in self._live_pool_cache:
+                return self._live_pool_cache[cache_key]
+            df = load_pool(cache_key, self.config.null_pool_cache_dir)
+            self._live_pool_cache[cache_key] = df
+            return df
+
+    def _observed_ls_split(self, r: Dict) -> Tuple[int, int]:
+        """Recover the long/short trade counts of an observed result.
+
+        Tries regime_stats first (the parser's canonical source); falls back
+        to attributing wholesale via signal.direction when buckets are empty
+        (random_baseline tag missing, or older cached results).
+        """
+        n_long = n_short = 0
+        for reg in ("bull", "bear", "range", "volatile"):
+            rd = (r.get("regime_stats") or {}).get(reg, {})
+            n_long += int((rd.get("long") or {}).get("trades", 0) or 0)
+            n_short += int((rd.get("short") or {}).get("trades", 0) or 0)
+        if n_long + n_short == 0:
+            total = int(r.get("trades", 0) or 0)
+            sig_dir = (r.get("direction") or "both").lower()
+            if sig_dir == "long":
+                n_long = total
+            elif sig_dir == "short":
+                n_short = total
+            # direction="both" with empty regime_stats → 50/50 fallback
+            elif total > 0:
+                n_long = total // 2
+                n_short = total - n_long
+        return n_long, n_short
+
+    def _live_pvalue_for_result(self, r: Dict) -> Optional[float]:
+        """Compute the empirical p-value for a single result on the fly.
+
+        Dispatches on signal.direction to the appropriate pool(s):
+          - "long"  → bootstrap against long-only pool
+          - "short" → bootstrap against short-only pool
+          - "both"  → mixed bootstrap (sample n_long from L pool + n_short
+                      from S pool, matching the observed signal's L/S split)
+        """
+        if not getattr(self.config, "enable_null_pool", False):
+            return None
+        if r.get("signal_type") == "random_baseline":
+            return None  # don't bootstrap a pool against itself
+
+        pair = str(r["pair"])
+        tf = str(r["timeframe"])
+        exit_cfg = str(r.get("exit_config") or "none")
+        seed = int(self.config.null_pool_seed)
+        timerange = self.config.timerange
+        n_boot = int(self.config.null_pool_n_bootstrap)
+        cap_pct = float(self.config.null_pool_capital_pct)
+        block_len = float(self.config.null_pool_block_len)
+        observed_pct = float(r.get("profit_pct", 0) or 0)
+        sig_dir = (r.get("direction") or "both").lower()
+        # Pool key matches the signal's exit_config (drives trade dist) but
+        # uses NEUTRAL SL/ROI (minor variations don't shift dist enough to
+        # justify the cost of a separate pool per SL/ROI combo).
+        ns, nr = self.NULL_POOL_NEUTRAL_SL, self.NULL_POOL_NEUTRAL_ROI
+
+        try:
+            if sig_dir == "long":
+                key = compute_cache_key(
+                    pair, tf, exit_cfg, ns, nr, timerange, seed,
+                    direction="long",
+                )
+                pool = self._load_pool_cached(key)
+                if pool is None or "profit_ratio" not in pool.columns:
+                    return None
+                return pvalue_vs_null(
+                    pool["profit_ratio"].values,
+                    observed_return_pct=observed_pct,
+                    n_trades=int(r.get("trades", 0) or 0),
+                    capital_pct_per_trade=cap_pct,
+                    n_bootstrap=n_boot,
+                    seed=seed,
+                    mean_block_len=block_len,
+                )
+            elif sig_dir == "short":
+                key = compute_cache_key(
+                    pair, tf, exit_cfg, ns, nr, timerange, seed,
+                    direction="short",
+                )
+                pool = self._load_pool_cached(key)
+                if pool is None or "profit_ratio" not in pool.columns:
+                    return None
+                return pvalue_vs_null(
+                    pool["profit_ratio"].values,
+                    observed_return_pct=observed_pct,
+                    n_trades=int(r.get("trades", 0) or 0),
+                    capital_pct_per_trade=cap_pct,
+                    n_bootstrap=n_boot,
+                    seed=seed,
+                    mean_block_len=block_len,
+                )
+            else:  # "both" — mixed bootstrap
+                n_long, n_short = self._observed_ls_split(r)
+                if n_long + n_short == 0:
+                    return None
+                key_l = compute_cache_key(
+                    pair, tf, exit_cfg, ns, nr, timerange, seed, direction="long",
+                )
+                key_s = compute_cache_key(
+                    pair, tf, exit_cfg, ns, nr, timerange, seed, direction="short",
+                )
+                pool_l = self._load_pool_cached(key_l)
+                pool_s = self._load_pool_cached(key_s)
+                long_arr = (
+                    pool_l["profit_ratio"].values
+                    if pool_l is not None and "profit_ratio" in pool_l.columns
+                    else np.array([])
+                )
+                short_arr = (
+                    pool_s["profit_ratio"].values
+                    if pool_s is not None and "profit_ratio" in pool_s.columns
+                    else np.array([])
+                )
+                if (n_long > 0 and len(long_arr) == 0) or (n_short > 0 and len(short_arr) == 0):
+                    return None
+                return pvalue_vs_null_mixed(
+                    long_arr, short_arr,
+                    observed_return_pct=observed_pct,
+                    n_long=n_long, n_short=n_short,
+                    capital_pct_per_trade=cap_pct,
+                    n_bootstrap=n_boot,
+                    seed=seed,
+                    mean_block_len=block_len,
+                )
+        except Exception:
+            return None
+
+    def _compute_pvalues_phase(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Phase 3: ensure every row has p_value (filled live during Phase 2),
+        then add p_value_adj (BH-FDR over the whole batch).
+
+        Live computation in run_single populates p_value as each backtest
+        finishes. This phase backfills any rows the live path skipped (e.g.,
+        rows missing stoploss/roi metadata or with parse errors), then adds
+        FDR — which is by definition a global step.
+        """
+        if df is None or len(df) == 0:
+            return df
+
+        # Pre-fill p_value column from any live-computed values
+        if "p_value" not in df.columns:
+            df = df.copy()
+            df["p_value"] = float("nan")
+
+        cache_dir = self.config.null_pool_cache_dir
+        seed = int(self.config.null_pool_seed)
+        n_boot = int(self.config.null_pool_n_bootstrap)
+        cap_pct = float(self.config.null_pool_capital_pct)
+        block_len = float(self.config.null_pool_block_len)
+        timerange = self.config.timerange
+
+        pvals = []
+        for _, r in df.iterrows():
+            # Honor live-computed p-value if present (avoid double bootstrap)
+            existing = r.get("p_value")
+            if existing is not None and not (
+                isinstance(existing, float) and pd.isna(existing)
+            ):
+                pvals.append(float(existing))
+                continue
+            # Backfill via the same dispatcher used live (consistent direction
+            # handling, mixed bootstrap for "both", thread-safe pool cache).
+            p = self._live_pvalue_for_result(dict(r))
+            pvals.append(float(p) if p is not None else float("nan"))
+
+        # Silence unused-vars warning when pool_cache path is removed
+        _ = (cache_dir, seed, n_boot, cap_pct, block_len, timerange)
+
+        df = df.copy()
+        df["p_value"] = pvals
+        # BH-FDR adjustment over non-NaN p-values only
+        valid = df["p_value"].notna()
+        if valid.sum() > 0:
+            adj = bh_adjusted_pvalues(df.loc[valid, "p_value"].values)
+            df["p_value_adj"] = float("nan")
+            df.loc[valid, "p_value_adj"] = adj
+        else:
+            df["p_value_adj"] = float("nan")
+        return df
+
+    # ============================================================
+    # === run_all (orchestrator) ===
+    # ============================================================
+
     def run_all(
         self, signals: List[SignalConfig], pairs: List[str], timeframes: List[str]
     ) -> pd.DataFrame:
@@ -500,6 +957,10 @@ class BacktestRunner:
         Returns:
             DataFrame with all results
         """
+        # === Phase 1: build null pools (only when --null-pool enabled) ===
+        if getattr(self.config, "enable_null_pool", False):
+            self._build_null_pools_phase(signals, pairs, timeframes)
+
         # Build task list
         tasks = []
         for sig in signals:
@@ -572,7 +1033,88 @@ class BacktestRunner:
                     f"  ⚡ Cache hits (skipped freqtrade): {self.cache_hits} / {self.total}"
                 )
 
-        return pd.DataFrame(results)
+        df = pd.DataFrame(results)
+
+        # === Phase 3: empirical p-values via bootstrap on the null pools ===
+        if getattr(self.config, "enable_null_pool", False) and len(df) > 0:
+            df = self._compute_pvalues_phase(df)
+            n_sig = int(((df["p_value"].notna()) & (df["p_value"] < 0.05)).sum())
+            n_sig_adj = int(((df["p_value_adj"].notna()) & (df["p_value_adj"] < 0.05)).sum())
+            with print_lock:
+                print(
+                    f"  🎲 Bootstrap p-values: {n_sig}/{len(df)} signals at p<0.05 raw, "
+                    f"{n_sig_adj} after BH-FDR"
+                )
+                self._print_phase3_summary(df)
+
+        return df
+
+    def _print_phase3_summary(self, df: pd.DataFrame) -> None:
+        """Re-print result lines with p-values attached, sorted by raw p-value.
+
+        Phase 2 prints lines as backtests complete — at that point the bootstrap
+        hasn't run yet, so p_value isn't known. This summary fills the gap by
+        re-emitting each line with the same format plus `p=X.XXX*` suffix
+        (* = p<0.05, • = p<0.10, blank otherwise).
+        """
+        if len(df) == 0:
+            return
+        # Sort: significant first (smallest p), then by sharpe descending
+        df_sorted = df.copy()
+        df_sorted["_p_sort"] = df_sorted["p_value"].fillna(1.0)
+        df_sorted = df_sorted.sort_values(
+            ["_p_sort", "sharpe"], ascending=[True, False]
+        )
+
+        print(f"\n{'=' * 100}")
+        print("🎲 PHASE 3 — RÉSULTATS AVEC P-VALUES (triés p-value, puis Sharpe)")
+        print(f"{'=' * 100}")
+
+        for i, (_, r) in enumerate(df_sorted.iterrows(), 1):
+            # Build same display blocks as _print_result for consistency
+            long_n = long_w = short_n = short_w = 0
+            for reg in ["bull", "bear", "range", "volatile"]:
+                rd = (r.get("regime_stats") or {}).get(reg, {})
+                long_n += int((rd.get("long") or {}).get("trades", 0) or 0)
+                short_n += int((rd.get("short") or {}).get("trades", 0) or 0)
+                long_w += int((rd.get("long") or {}).get("wins", 0) or 0)
+                short_w += int((rd.get("short") or {}).get("wins", 0) or 0)
+            total_tr = int(r.get("trades", 0) or 0)
+            if (long_n + short_n) == 0 and total_tr > 0:
+                sig_dir = (r.get("direction") or "both").lower()
+                wins_total = int(r.get("wins", 0) or 0)
+                if sig_dir == "long":
+                    long_n, long_w = total_tr, wins_total
+                elif sig_dir == "short":
+                    short_n, short_w = total_tr, wins_total
+
+            pv = r.get("p_value")
+            pv_adj = r.get("p_value_adj")
+            if pv is None or (isinstance(pv, float) and pd.isna(pv)):
+                pv_str = "  n/a "
+                marker = " "
+            else:
+                if pv < 0.05:
+                    marker = "*"
+                elif pv < 0.10:
+                    marker = "•"
+                else:
+                    marker = " "
+                pv_str = f"{pv:.3f}"
+            adj_str = (
+                f"{pv_adj:.3f}"
+                if pv_adj is not None and not (isinstance(pv_adj, float) and pd.isna(pv_adj))
+                else "  n/a"
+            )
+
+            print(
+                f"  [{i:3d}/{len(df_sorted)}] "
+                f"{r['signal']:<35} {short_pair(r['pair']):<6} {r['timeframe']:<4} │ "
+                f"Tr={total_tr:>4d} ({long_n:>3d}L/{short_n:>3d}S) "
+                f"PnL={r['profit_pct']:+6.1f}% "
+                f"Sharpe={r['sharpe']:+5.2f} │ "
+                f"p={pv_str}{marker} (adj={adj_str})"
+            )
 
     def _print_result(self, r: Dict):
         """Print a single result line: trades L/S, WR L/S, PnL, DD + duration, Sharpe."""
@@ -587,6 +1129,19 @@ class BacktestRunner:
                 short_n += int(short_d.get("trades", 0) or 0)
                 long_w += int(long_d.get("wins", 0) or 0)
                 short_w += int(short_d.get("wins", 0) or 0)
+
+            # Fallback for cached results predating the tag-format fix or for
+            # tags the regex parser couldn't bucket: attribute via
+            # signal.direction wholesale (works for direction="long" or "short";
+            # direction="both" rows stay 0/0 since we'd need per-trade detail).
+            total_tr = int(r.get("trades", 0) or 0)
+            if (long_n + short_n) == 0 and total_tr > 0:
+                sig_dir = (r.get("direction") or "both").lower()
+                wins_total = int(r.get("wins", 0) or 0)
+                if sig_dir == "long":
+                    long_n, long_w = total_tr, wins_total
+                elif sig_dir == "short":
+                    short_n, short_w = total_tr, wins_total
             long_wr = (long_w / long_n * 100) if long_n > 0 else 0.0
             short_wr = (short_w / short_n * 100) if short_n > 0 else 0.0
 
@@ -598,22 +1153,51 @@ class BacktestRunner:
             mkt_part = f"MKT={mkt:+6.1f}%"
             pnl_l = r.get("profit_pct_long", 0) or 0
             pnl_s = r.get("profit_pct_short", 0) or 0
+            # Same fallback as L/S counts: when parser couldn't split, attribute
+            # global PnL to signal.direction wholesale.
+            if pnl_l == 0 and pnl_s == 0 and r.get("profit_pct", 0):
+                sig_dir = (r.get("direction") or "both").lower()
+                if sig_dir == "long":
+                    pnl_l = r["profit_pct"]
+                elif sig_dir == "short":
+                    pnl_s = r["profit_pct"]
             pnl_part = (
                 f"PnL={r['profit_pct']:+6.1f}%(L:{pnl_l:+5.1f}%/S:{pnl_s:+5.1f}%)"
             )
 
-            # ⚡ prefix on cache hits (no freqtrade subprocess), ▶ on fresh runs
-            tag = "⚡" if r.get("_cached") else "▶"
+            # Tag prefix:
+            #   🎲 = null-pool random_baseline build
+            #   ⚡ = freqtrade cache hit (no subprocess)
+            #   ▶  = fresh freqtrade run
+            if r.get("signal_type") == "random_baseline":
+                tag = "🎲"
+            elif r.get("_cached"):
+                tag = "⚡"
+            else:
+                tag = "▶"
+
+            # Optional p-value suffix (only present in Phase 3 results)
+            p_part = ""
+            pv = r.get("p_value")
+            if pv is not None and not (isinstance(pv, float) and pd.isna(pv)):
+                if pv < 0.05:
+                    sig_marker = "*"
+                elif pv < 0.10:
+                    sig_marker = "•"
+                else:
+                    sig_marker = " "
+                p_part = f" p={pv:.3f}{sig_marker}"
 
             print(
                 f"  {tag} [{self.completed:3d}/{self.total}] "
-                f"{r['signal']:<35} {r['pair']:<18} {r['timeframe']:<4} │ "
+                f"{r['signal']:<35} {short_pair(r['pair']):<6} {r['timeframe']:<4} │ "
                 f"Tr={r['trades']:>4d} {ls_part} "
                 f"{wr_part} "
                 f"{pnl_part} "
                 f"{mkt_part} "
                 f"{dd_part} "
                 f"Sharpe={r['sharpe']:+5.2f}"
+                f"{p_part}"
             )
 
     def _debug_output(self, signal_name: str, result):

@@ -22,6 +22,7 @@ from .sections.coin import (
     print_coin_comparison_matrix,
     print_consistent_performers,
 )
+from .sections.winners import print_winners
 from .formatters import print_header
 
 
@@ -52,6 +53,9 @@ class ReportGenerator:
 
         self._print_header()
         print_global_metrics(self.df)
+        # Winners first: surfaces FDR-significant methods immediately so the
+        # user doesn't have to triangulate across 6 sections to find them.
+        print_winners(self.df, top_n=top_n)
         print_regime_distribution(self.df)
         print_regime_performance(self.df)
         print_signal_regime_matrix(self.df)

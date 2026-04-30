@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List
 from ..formatters import print_header, print_section
+from ...utils.helpers import short_pair
 
 
 def print_regime_distribution(df: pd.DataFrame):
@@ -132,13 +133,13 @@ def _print_top_by_regime(regime_data: Dict):
             sorted_data = sorted(data, key=lambda x: x["profit_pct"], reverse=True)[:10]
 
             print(
-                f"    {'#':<3} {'Signal':<28} {'Pair':<16} │ {'Tr':<4} {'WR%':<6} {'PnL%':<8}"
+                f"    {'#':<3} {'Signal':<28} {'Pair':<6} │ {'Tr':<4} {'WR%':<6} {'PnL%':<8}"
             )
-            print("    " + "─" * 75)
+            print("    " + "─" * 65)
 
             for i, d in enumerate(sorted_data, 1):
                 print(
-                    f"    {i:<3} {d['signal']:<28} {d['pair']:<16} │ "
+                    f"    {i:<3} {d['signal']:<28} {short_pair(d['pair']):<6} │ "
                     f"{d['trades']:<4} {d['win_rate']:<6.1f} {d['profit_pct']:<+8.2f}"
                 )
 

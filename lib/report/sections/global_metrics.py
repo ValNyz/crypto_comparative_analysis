@@ -11,6 +11,25 @@ def print_global_metrics(df: pd.DataFrame):
     profitable = df[df["profit_pct"] > 0]
     avg_cons = df["consistency"].mean() if "consistency" in df.columns else 0
 
+    # Significance counts (filled when null pool ran)
+    has_p = "p_value" in df.columns and df["p_value"].notna().any()
+    has_padj = "p_value_adj" in df.columns and df["p_value_adj"].notna().any()
+    n_sig_raw = (
+        int(((df["p_value"].notna()) & (df["p_value"] < 0.05)).sum()) if has_p else 0
+    )
+    n_sig_adj = (
+        int(((df["p_value_adj"].notna()) & (df["p_value_adj"] < 0.05)).sum())
+        if has_padj
+        else 0
+    )
+
+    sig_line = ""
+    if has_p:
+        sig_line = (
+            f"│  Significatifs p<0.05:  {n_sig_raw:<6} brut "
+            f"/ {n_sig_adj:<3} après FDR                    │\n"
+        )
+
     print(f"""
 ┌──────────────────────────────────────────────────────────────────┐
 │  MÉTRIQUES GLOBALES                                              │
@@ -23,4 +42,4 @@ def print_global_metrics(df: pd.DataFrame):
 │  Sharpe moyen:          {df["sharpe"].mean():<+6.2f}                                   │
 │  Profit moyen:          {df["profit_pct"].mean():<+6.1f}%                                  │
 │  Consistance moyenne:   {avg_cons:<6.1f}% (mois profitables)               │
-└──────────────────────────────────────────────────────────────────┘""")
+{sig_line}└──────────────────────────────────────────────────────────────────┘""")

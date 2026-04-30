@@ -6,6 +6,7 @@
 import pandas as pd
 from typing import Dict, Any
 from ..formatters import print_header
+from ...utils.helpers import short_pair
 
 
 def print_per_coin_summary(df: pd.DataFrame, top_n: int = 5):
@@ -35,10 +36,10 @@ def print_per_coin_summary(df: pd.DataFrame, top_n: int = 5):
         avg_sharpe = pair_df["sharpe"].mean()
 
         # Coin name (extract from pair like "BTC/USDC:USDC" -> "BTC")
-        coin = pair.split("/")[0]
+        coin = short_pair(pair)
 
         print(f"\n{'─' * 110}")
-        print(f"  📈 {pair}")
+        print(f"  📈 {coin}")
         print(
             f"     Stratégies: {len(pair_df)} │ "
             f"Profitables: {len(profitable)} ({len(profitable) / len(pair_df) * 100:.1f}%) │ "
@@ -196,7 +197,7 @@ def print_consistent_performers(df: pd.DataFrame, min_coins: int = 2):
 
     for signal, perf in sorted_signals[:15]:  # Top 15
         coins_detail = ", ".join(
-            f"{c['pair'].split('/')[0]}({c['sharpe']:+.1f})"
+            f"{short_pair(c['pair'])}({c['sharpe']:+.1f})"
             for c in sorted(perf["coins"], key=lambda x: x["sharpe"], reverse=True)
         )
         print(

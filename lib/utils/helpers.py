@@ -34,6 +34,15 @@ def get_allowed_regimes(
     return ["bull", "bear", "range", "volatile"]
 
 
+def short_pair(pair: str) -> str:
+    """Compact display form: 'BTC/USDC:USDC' → 'BTC'.
+
+    Use only for printing — keep the canonical form everywhere else
+    (freqtrade configs, cache keys, filenames).
+    """
+    return pair.split("/")[0] if "/" in pair else pair
+
+
 def sanitize_class_name(name: str) -> str:
     """
     Convert a signal name to a valid Python class name.

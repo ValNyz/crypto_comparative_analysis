@@ -10,6 +10,7 @@ from typing import Optional
 from .base import ReportGenerator
 from .formatters import print_header, print_section
 from ..config.base import Config
+from ..utils.helpers import short_pair
 
 
 class RollingReportGenerator(ReportGenerator):
@@ -182,7 +183,7 @@ class RollingReportGenerator(ReportGenerator):
                 icon = "🔴"
 
             print(
-                f"  {i:<3} {r['signal']:<30} {r['pair']:<14} {r['timeframe']:<4} │ "
+                f"  {i:<3} {r['signal']:<30} {short_pair(r['pair']):<6} {r['timeframe']:<4} │ "
                 f"{int(r['n_windows']):<4} {r['pct_profitable']:<5.0f}% {r['pct_sharpe_pos']:<5.0f}% │ "
                 f"{sharpe_str:<14} │ {r['robustness']:<5.2f} {r['stability']:<5.2f} {icon}"
             )
@@ -551,7 +552,7 @@ class RollingReportGenerator(ReportGenerator):
         if len(best) > 0:
             for i, (_, r) in enumerate(best.iterrows(), 1):
                 print(f"     {i}. {r['signal']}")
-                print(f"        Pair: {r['pair']} │ TF: {r['timeframe']}")
+                print(f"        Pair: {short_pair(r['pair'])} │ TF: {r['timeframe']}")
                 print(
                     f"        Robustesse: {r['robustness']:.2f} │ Stabilité: {r['stability']:.2f}"
                 )
@@ -629,7 +630,7 @@ class RollingReportGenerator(ReportGenerator):
             avg_pct_prof = pair_df["pct_profitable"].mean()
 
             print(f"\n{'─' * 110}")
-            print(f"  📈 {pair}")
+            print(f"  📈 {short_pair(pair)}")
             print(
                 f"     Signaux: {len(pair_df)} │ "
                 f"Robustes (≥0.5): {high_robust} ({high_robust / len(pair_df) * 100:.1f}%) │ "
@@ -782,7 +783,7 @@ class RollingReportGenerator(ReportGenerator):
 
         for signal, perf in sorted_signals[:15]:
             details = ", ".join(
-                f"{c['pair'].split('/')[0]}({c['robustness']:.2f})"
+                f"{short_pair(c['pair'])}({c['robustness']:.2f})"
                 for c in sorted(
                     perf["coins"], key=lambda x: x["robustness"], reverse=True
                 )

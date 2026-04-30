@@ -32,6 +32,7 @@ from .templates.standard import STRATEGY_TEMPLATE_STANDARD
 from .templates.funding import STRATEGY_TEMPLATE_FUNDING
 from .templates.external_block import EXTERNAL_LOADERS_BLOCK
 from .templates.cross_coin_block import CROSS_COIN_LOADERS_BLOCK
+from .templates.random_baseline import STRATEGY_TEMPLATE_RANDOM_BASELINE
 
 
 def _needs_external_block(signal: SignalConfig) -> bool:
@@ -261,6 +262,10 @@ class StrategyGenerator:
             code = self._generate_funding_strategy(
                 signal, exit_cfg, actual_tf, class_name
             )
+        elif signal.signal_type == "random_baseline":
+            code = self._generate_random_baseline_strategy(
+                signal, exit_cfg, actual_tf, class_name
+            )
         else:
             code = self._generate_standard_strategy(
                 signal, exit_cfg, actual_tf, class_name
@@ -480,6 +485,36 @@ class StrategyGenerator:
             volume_zscore_min=signal.params.get("volume_zscore_min", 2.5),
             use_bbw_squeeze_filter=signal.params.get("use_bbw_squeeze", False),
             bbw_pct_max=signal.params.get("bbw_pct_max", 0.15),
+        )
+
+    def _generate_random_baseline_strategy(
+        self,
+        signal: SignalConfig,
+        exit_cfg: ExitConfig,
+        timeframe: str,
+        class_name: str,
+    ) -> str:
+        """Generate a null-pool baseline strategy.
+
+        Random long/short entries seeded by (seed, pair). Uses the SAME
+        exit logic / SL / ROI as the strategy under test so the resulting
+        trade list is directly comparable.
+        """
+        exit_logic = generate_exit_logic(exit_cfg, "random_baseline")
+
+        return STRATEGY_TEMPLATE_RANDOM_BASELINE.format(
+            name=signal.name,
+            class_name=class_name,
+            timeframe=timeframe,
+            roi=json.dumps({str(k): v for k, v in signal.roi.items()}),
+            stoploss=signal.stoploss,
+            seed=int(signal.params.get("seed", 42)),
+            target_trades=int(signal.params.get("target_trades", 2000)),
+            direction=signal.direction,
+            indicators_block=INDICATORS_CORE,
+            exit_logic=exit_logic,
+            custom_exit_method=generate_custom_exit_method(exit_cfg),
+            partial_exit_method=generate_partial_exit_method(exit_cfg),
         )
 
     def generate_batch(self, signals: list, timeframe: str) -> list:
