@@ -2,7 +2,7 @@
 # P1+P2 Grid — wider SL/ROI sweeps + trailing variants.
 #
 # Mirrors the framework's top-OOS patterns:
-#   - tr_100_50  → exit_config: trailing_roi_fixed  (arm +1% / 0.5% trail)
+#   - tr_100_50  → exit_config: trailing_roi_1_05  (arm +1% / 0.5% trail)
 #   - tr_200_100 → exit_config: trailing_roi_2_1   (arm +2% / 1% trail)
 #   - target     → exit_config: none                (ROI-only)
 #
@@ -36,7 +36,7 @@ funding_baseline:
       - { "0": 0.02 }
       - { "0": 0.05 }
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed, trailing_roi_2_1]
+    exit_config: [none, trailing_roi_1_05, trailing_roi_2_1]
     # = 3 × 2 × 2 × 2 × 3 = 72 strats
 
 # === FUNDING + BTC REGIME — top pattern (ENA donchian + btc_range) ===
@@ -65,7 +65,7 @@ funding_macro_fng:
       fng_consec: [3]
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 2 × 2 × 1 × 2 × 2 = 16 strats
 
 # === FUNDING + ETF FLOWS ===
@@ -79,7 +79,7 @@ funding_macro_etf:
       etf_inflow_min_long: [200, 300]
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 2 × 2 = 4 strats
 
 # === FUNDING + VIX ===
@@ -92,7 +92,7 @@ funding_macro_vix:
       vix_max_long: [25, 30]
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 2 × 2 = 4 strats
 
 # === FUNDING_MODE: FLIP — proven on ETH 8h, PURR 1h ===
@@ -103,7 +103,7 @@ funding_mode_flip:
       funding_mode: flip
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed, trailing_roi_2_1]
+    exit_config: [none, trailing_roi_1_05, trailing_roi_2_1]
     # = 2 × 3 = 6 strats
   - name: "fflip_fng_f{fng_fear}"
     direction: long
@@ -114,7 +114,7 @@ funding_mode_flip:
       fng_consec: [3]
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 2 × 2 = 4 strats
 
 # === FUNDING_MODE: CUM_7D — funding fatigue ===
@@ -126,7 +126,7 @@ funding_mode_cum7d:
       zscore: [1.5, 2.0]
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 2 × 2 × 2 = 8 strats
 
 # === TECHNICAL TRIGGERS (P1+P2 new signal_types) ===
@@ -137,14 +137,14 @@ technical_signals:
     direction: long
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed, trailing_roi_2_1]
+    exit_config: [none, trailing_roi_1_05, trailing_roi_2_1]
     # = 3 × 3 = 9 strats
   - name: "trig_bull_climax_short"
     signal_type: bull_climax
     direction: short
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed, trailing_roi_2_1]
+    exit_config: [none, trailing_roi_1_05, trailing_roi_2_1]
     # = 3 × 3 = 9 strats
 
   # VWAP zscore — vwap_deviation_low top OOS (PURR/HYPE 15m Sharpe 3.06)
@@ -155,7 +155,7 @@ technical_signals:
       vwap_zscore_threshold: [2.0, 2.5]
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed, trailing_roi_2_1]
+    exit_config: [none, trailing_roi_1_05, trailing_roi_2_1]
     # = 2 × 3 × 3 = 18 strats
   - name: "trig_vwapz_short_z{vwap_zscore_threshold}"
     signal_type: vwap_zscore
@@ -164,7 +164,7 @@ technical_signals:
       vwap_zscore_threshold: [2.0, 2.5]
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 2 × 2 × 2 = 8 strats
 
   # Ratios coin/BTC (mean-rev + breakout)
@@ -175,7 +175,7 @@ technical_signals:
       zscore: [2.0]
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 2 × 2 = 4
   - name: "trig_rbtc_extreme_short"
     signal_type: ratio_btc_extreme
@@ -184,7 +184,7 @@ technical_signals:
       zscore: [2.0]
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 4
   - name: "trig_rbtc_breakout_long"
     signal_type: ratio_btc_breakout
@@ -209,7 +209,7 @@ technical_signals:
       zscore: [2.0]
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 4
   - name: "trig_reth_extreme_short"
     signal_type: ratio_eth_extreme
@@ -218,7 +218,7 @@ technical_signals:
       zscore: [2.0]
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 4
   - name: "trig_reth_breakout_long"
     signal_type: ratio_eth_breakout
@@ -257,14 +257,14 @@ technical_signals:
     direction: long
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 4
   - name: "trig_trendweak_short"
     signal_type: trend_weakening
     direction: short
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 4
 
 # === COMBO SIGNALS — confluence of P1/P2 conditions ===
@@ -277,7 +277,7 @@ combo_signals:
       min_signals: 2
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 4
   - name: "combo_rsi_ob_x_ratio_btc_high"
     signal_type: combo
@@ -287,7 +287,7 @@ combo_signals:
       min_signals: 2
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 4
   - name: "combo_kumo_bull_x_vwap_oversold"
     signal_type: combo
@@ -347,5 +347,5 @@ combo_signals:
       min_signals: 2
     roi: [{ "0": 0.02 }]
     stoploss: [-0.03, -0.05, -0.10]
-    exit_config: [none, trailing_roi_fixed]
+    exit_config: [none, trailing_roi_1_05]
     # = 4
