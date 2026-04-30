@@ -23,6 +23,7 @@ from .sections.coin import (
     print_consistent_performers,
 )
 from .sections.winners import print_winners
+from .sections.drill_down import print_drill_down
 from .formatters import print_header
 
 
@@ -56,6 +57,9 @@ class ReportGenerator:
         # Winners first: surfaces FDR-significant methods immediately so the
         # user doesn't have to triangulate across 6 sections to find them.
         print_winners(self.df, top_n=top_n)
+        # Drill-down on top 10 deduped: per-month (with intra-month DD +
+        # market change) and per-regime — answers "is it robust or a fluke?"
+        print_drill_down(self.df, config=self.config, top_n=10)
         print_regime_distribution(self.df)
         print_regime_performance(self.df)
         print_signal_regime_matrix(self.df)

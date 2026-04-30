@@ -94,29 +94,34 @@ def print_winners(df: pd.DataFrame, top_n: int = 50, min_trades: int = RANK_MIN_
 
 
 def _print_cross_coin_robustness(df: pd.DataFrame, top_n: int = 50):
-    """Signals that win on ≥2 distinct pairs.
+    """Strategies that win on >=2 distinct pairs.
 
-    Groups by signal name (without pair). A name appearing on multiple pairs
-    with consistent sub-significance (raw p < 0.10 on each) is much more
-    likely a real edge than a single-coin coincidence.
+    A "strategy" = (signal, exit_config, stoploss). Two rows with the same
+    signal name but different exit or SL are different strategies. For each
+    surviving strategy, we show the BEST TF per coin so the user sees at a
+    glance "this strat wins on BTC(4h) but on ENA(30m)" without grepping.
     """
     if "signal" not in df.columns or "pair" not in df.columns:
         return
     if "p_value" not in df.columns or not df["p_value"].notna().any():
         return
 
-    sig_df = df[df["p_value"].notna() & (df["p_value"] < 0.10)]
+    sig_df = df[df["p_value"].notna() & (df["p_value"] < 0.10)].copy()
     if len(sig_df) == 0:
         return
 
-    # Group by signal name → set of distinct pairs where it's significant
+    # Strategy identity: (signal, exit_config, stoploss). Stoploss may be
+    # absent in older result schemas; default to NaN-safe placeholder.
+    strat_keys = ["signal", "exit_config"]
+    if "stoploss" in sig_df.columns:
+        strat_keys.append("stoploss")
+
     grouped = (
-        sig_df.groupby("signal")
+        sig_df.groupby(strat_keys, dropna=False)
         .agg(
             n_pairs=("pair", "nunique"),
             mean_sharpe=("sharpe", "mean"),
             mean_pnl=("profit_pct", "mean"),
-            mean_pval=("p_value", "mean"),
             best_padj=("p_value_adj", "min"),
             n_total=("pair", "count"),
         )
@@ -128,21 +133,48 @@ def _print_cross_coin_robustness(df: pd.DataFrame, top_n: int = 50):
     if len(multi) == 0:
         return
 
+    # Per-strategy-pair best TF: lowest p_value_adj within each
+    # (signal, exit_config, stoploss, pair) group → keep its TF.
+    best_tf = (
+        sig_df.sort_values("p_value_adj", ascending=True)
+        .drop_duplicates(subset=strat_keys + ["pair"], keep="first")
+    )
+
+    def _tf_breakdown(strat_row: pd.Series) -> str:
+        """E.g. 'BTC(4h), ENA(1h), SOL(30m)' for a strat winning on 3 coins."""
+        mask = (best_tf["signal"] == strat_row["signal"]) & (
+            best_tf["exit_config"] == strat_row["exit_config"]
+        )
+        if "stoploss" in strat_keys:
+            mask &= best_tf["stoploss"] == strat_row["stoploss"]
+        rows = best_tf[mask].sort_values("p_value_adj", ascending=True)
+        return ", ".join(
+            f"{short_pair(str(r['pair']))}({r['timeframe']})"
+            for _, r in rows.iterrows()
+        )
+
     print(
-        f"\n  🌍 ROBUSTESSE CROSS-COIN — signaux significatifs sur ≥2 pairs : "
+        f"\n  🌍 ROBUSTESSE CROSS-COIN — strats sur >=2 pairs (signal+exit+SL) : "
         f"{len(multi)} candidats"
     )
     print(
-        f"\n  {'#':<3} {'Signal':<35} {'#Pairs':<7} {'Tests':<6} │ "
-        f"{'Avg Sharpe':<11} {'Avg PnL%':<10} {'Avg p':<7} {'Best p_adj':<10}"
+        f"\n  {'#':<3} {'Signal':<28} {'Exit':<14} {'SL':<5} {'#':<3} │ "
+        f"{'Sharpe':<7} {'PnL%':<8} {'Best p_adj':<11} │ Best TF par coin"
     )
-    print("  " + "─" * 95)
+    print("  " + "─" * 130)
     for i, (_, r) in enumerate(multi.head(top_n).iterrows(), 1):
+        breakdown = _tf_breakdown(r)
+        sl_str = (
+            f"{abs(int(round(float(r['stoploss']) * 100)))}%"
+            if "stoploss" in strat_keys and pd.notna(r.get("stoploss"))
+            else "  -  "
+        )
+        exit_str = str(r["exit_config"])[:14]
         print(
-            f"  {i:<3} {r['signal']:<35} {int(r['n_pairs']):<7} "
-            f"{int(r['n_total']):<6} │ "
-            f"{r['mean_sharpe']:<+11.2f} {r['mean_pnl']:<+10.1f} "
-            f"{r['mean_pval']:<7.3f} {r['best_padj']:<10.3f}"
+            f"  {i:<3} {str(r['signal'])[:28]:<28} {exit_str:<14} "
+            f"{sl_str:<5} {int(r['n_pairs']):<3} │ "
+            f"{r['mean_sharpe']:<+7.2f} {r['mean_pnl']:<+8.1f} "
+            f"{r['best_padj']:<11.4f} │ {breakdown}"
         )
 
 
@@ -171,19 +203,26 @@ def _print_temporal_robustness(df: pd.DataFrame, top_n: int = 50):
     )
     print(
         f"\n  {'#':<3} {'Signal':<30} {'Pair':<6} {'TF':<4} │ "
-        f"{'Sharpe':<7} {'Cons%':<6} {'Mois+':<6} {'PnL%':<7} {'p':<6} {'Score':<7}"
+        f"{'Sharpe':<7} {'Cons%':<6} {'Mois+':<6} {'PnL%':<7} "
+        f"{'p':<6} {'p_adj':<6} {'Score':<7}"
     )
-    print("  " + "─" * 100)
+    print("  " + "─" * 110)
     for i, (_, r) in enumerate(df_t.head(top_n).iterrows(), 1):
         cons = r.get("consistency", 0) or 0
         m_prof = r.get("months_profitable", 0) or 0
         m_tot = r.get("months_total", 0) or 0
         mois = f"{int(m_prof)}/{int(m_tot)}"
+        pv_adj = r.get("p_value_adj")
+        adj_s = (
+            f"{pv_adj:.3f}"
+            if pv_adj is not None and not pd.isna(pv_adj)
+            else " n/a "
+        )
         print(
             f"  {i:<3} {r['signal']:<30} {short_pair(r['pair']):<6} "
             f"{r['timeframe']:<4} │ "
             f"{r['sharpe']:<+7.2f} {cons:<6.0f} {mois:<6} "
-            f"{r['profit_pct']:<+7.1f} {r['p_value']:<6.3f} "
+            f"{r['profit_pct']:<+7.1f} {r['p_value']:<6.3f} {adj_s:<6} "
             f"{r['robust_score']:<7.1f}"
         )
 
