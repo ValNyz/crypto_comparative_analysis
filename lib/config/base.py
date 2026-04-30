@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 
 @dataclass
@@ -33,8 +33,12 @@ class Config:
     max_workers: int = 6
 
     # Wallet/Position
-    dry_run_wallet: float = 300
-    stake_amount: float = 30
+    dry_run_wallet: float = 1000
+    # Stake per trade. "unlimited" = 100% of available balance per entry.
+    # Combined with max_open_trades=1 this means each trade uses the full
+    # wallet (no fractional staking) — desired so portfolio PnL reflects
+    # the strategy's per-trade returns directly without 10× compression.
+    stake_amount: Union[float, str] = "unlimited"
     max_open_trades: int = 1
 
     # Regime detection parameters

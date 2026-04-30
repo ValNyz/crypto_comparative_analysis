@@ -172,6 +172,8 @@ class BacktestRunner:
             "max_dd_pct": float(strat.get("max_drawdown_account", 0) or 0) * 100.0,
             "dd_duration_days": float(strat.get("drawdown_duration_s", 0) or 0) / 86400.0,
             "market_change_pct": float(strat.get("market_change", 0) or 0) * 100.0,
+            "profit_pct_long": float(strat.get("profit_total_long", 0) or 0) * 100.0,
+            "profit_pct_short": float(strat.get("profit_total_short", 0) or 0) * 100.0,
             "profit_factor": float(strat.get("profit_factor", 0) or 0),
             "wins": int(strat.get("wins", 0) or 0),
             "losses": int(strat.get("losses", 0) or 0),
@@ -594,6 +596,11 @@ class BacktestRunner:
             dd_part = f"DD={r['max_dd_pct']:5.1f}%({dd_dur:>3.0f}d)"
             mkt = r.get("market_change_pct", 0) or 0
             mkt_part = f"MKT={mkt:+6.1f}%"
+            pnl_l = r.get("profit_pct_long", 0) or 0
+            pnl_s = r.get("profit_pct_short", 0) or 0
+            pnl_part = (
+                f"PnL={r['profit_pct']:+6.1f}%(L:{pnl_l:+5.1f}%/S:{pnl_s:+5.1f}%)"
+            )
 
             # ⚡ prefix on cache hits (no freqtrade subprocess), ▶ on fresh runs
             tag = "⚡" if r.get("_cached") else "▶"
@@ -603,7 +610,7 @@ class BacktestRunner:
                 f"{r['signal']:<35} {r['pair']:<18} {r['timeframe']:<4} │ "
                 f"Tr={r['trades']:>4d} {ls_part} "
                 f"{wr_part} "
-                f"PnL={r['profit_pct']:+6.1f}% "
+                f"{pnl_part} "
                 f"{mkt_part} "
                 f"{dd_part} "
                 f"Sharpe={r['sharpe']:+5.2f}"

@@ -20,8 +20,8 @@ min_months: 2
 max_workers: 6
 
 # Wallet/Position
-dry_run_wallet: 300
-stake_amount: 30
+dry_run_wallet: 1000
+stake_amount: "unlimited"
 max_open_trades: 1
 
 # Regime detection parameters

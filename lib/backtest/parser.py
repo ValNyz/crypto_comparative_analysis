@@ -29,6 +29,8 @@ def parse_freqtrade_output(output: str) -> Dict:
         "max_dd_pct": 0.0,
         "dd_duration_days": 0.0,
         "market_change_pct": 0.0,
+        "profit_pct_long": 0.0,
+        "profit_pct_short": 0.0,
         "profit_factor": 0.0,
         "wins": 0,
         "losses": 0,
@@ -118,8 +120,13 @@ def _parse_metrics(output: str, result: Dict) -> Dict:
 
 def _parse_drawdown(output: str, result: Dict) -> Dict:
     """Parse maximum drawdown + duration."""
+    # The freqtrade `Absolute drawdown` cell looks like
+    #   `│ 344.065 USDC (34.41%) │`
+    # We want the parenthesized account-% (34.41), not a stray "1" from a greedy
+    # match. Lazy `*?` lets `[\d.]+%` find the longest valid digit run before `%`.
     match = re.search(
-        r"(?:Absolute drawdown|Max % of account)[^│┃|]*[│┃|][^│┃|]*([\d.]+)%", output
+        r"(?:Absolute drawdown|Max % of account)[^│┃|]*[│┃|][^│┃|]*?([\d.]+)\s*%",
+        output,
     )
     if match:
         try:
@@ -146,6 +153,29 @@ def _parse_drawdown(output: str, result: Dict) -> Dict:
             result["market_change_pct"] = float(mkt_match.group(1))
         except ValueError:
             pass
+
+    # Long / Short profit split — sum the per-Enter-Tag "Tot Profit %" column
+    # (freqtrade doesn't emit a dedicated "Total profit Long %" line). Tags
+    # encode direction as `…_long_<regime>` or `…_short_<regime>`.
+    tag_pattern = re.compile(
+        r"[│┃]\s*([\w.]+(?:long|short)_(?:bull|bear|range|volatile))"
+        r"\s*[│┃]\s*\d+\s*[│┃]\s*[-\d.]+\s*[│┃]\s*[-\d.]+\s*[│┃]\s*([-\d.]+)\s*[│┃]"
+    )
+    long_sum = 0.0
+    short_sum = 0.0
+    for tm in tag_pattern.finditer(output):
+        tag, tot_pft_pct = tm.group(1), tm.group(2)
+        try:
+            pct = float(tot_pft_pct)
+        except ValueError:
+            continue
+        if "_long_" in tag:
+            long_sum += pct
+        elif "_short_" in tag:
+            short_sum += pct
+    if long_sum != 0.0 or short_sum != 0.0:
+        result["profit_pct_long"] = long_sum
+        result["profit_pct_short"] = short_sum
 
     return result
 
