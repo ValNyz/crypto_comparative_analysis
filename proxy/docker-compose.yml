@@ -1,0 +1,29 @@
+services:
+  hl-proxy:
+    build:
+      context: .
+      # Use host network during build so pip can resolve PyPI even when
+      # the default bridge has no DNS / outbound.
+      network: host
+    container_name: hl-info-proxy
+    restart: unless-stopped
+    # host networking → no bridge subnet allocated, container listens
+    # directly on host's localhost:8888. Bypasses the "address pools fully
+    # subnetted" error when many compose stacks are running. Ports directive
+    # is therefore not needed (and would be ignored).
+    network_mode: host
+    environment:
+      HL_PROXY_REFILL_SEC: "1.0"        # 1 token added every N seconds
+      HL_PROXY_BUCKET_CAPACITY: "15"    # burst capacity before throttling
+      HL_PROXY_TIMEOUT_SEC: "30"
+      HL_PROXY_CACHE_TTL: "3600"        # cache /info responses for 1 hour
+                                        # (startup checks: meta + assetCtxs are
+                                        # quasi-static; backtests don't fetch
+                                        # live candles, they use local feathers)
+      HL_PROXY_CACHE_MAX_ENTRIES: "200"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8888/health', timeout=3).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
