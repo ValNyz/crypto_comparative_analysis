@@ -551,7 +551,11 @@ class BacktestRunner:
                 # rate-limit regex can false-match CCXT init logs → infinite
                 # retry loop on user Ctrl-C otherwise.
                 if result.returncode < 0:
-                    self._bump_completed()
+                    my_id = self._bump_completed()
+                    sig_label = {-2: "SIGINT", -9: "SIGKILL", -15: "SIGTERM"}.get(
+                        result.returncode, f"sig{-result.returncode}"
+                    )
+                    self._print_error(my_id, signal.name, pair, actual_tf, f"killed by {sig_label}")
                     if signal.signal_type == "random_baseline" or self.debug:
                         sig_name = {-2: "SIGINT", -9: "SIGKILL", -15: "SIGTERM"}.get(
                             result.returncode, f"sig{-result.returncode}"
@@ -579,7 +583,8 @@ class BacktestRunner:
                         continue
                     else:
                         self._log_rate_limit_failed(signal.name)
-                        self._bump_completed()
+                        my_id = self._bump_completed()
+                        self._print_error(my_id, signal.name, pair, actual_tf, "rate-limit retries exhausted")
                         return None
 
                 # Success or other error — capture our own id for the print path
@@ -589,15 +594,12 @@ class BacktestRunner:
                     self._debug_output(signal.name, result)
 
                 if result.returncode != 0:
-                    # ALWAYS log random_baseline failures — silent ones
-                    # produce 0 pools / 0 p-values, which is unrecoverable.
+                    self._print_error(my_id, signal.name, pair, actual_tf, f"freqtrade rc={result.returncode}")
                     if signal.signal_type == "random_baseline" or self.debug:
                         with print_lock:
                             err = (result.stderr or "")[-500:]
                             out_tail = (result.stdout or "")[-300:]
                             print(
-                                f"  💥 freqtrade rc={result.returncode} for "
-                                f"{signal.name} ({pair} {actual_tf}):\n"
                                 f"    stderr: {err!r}\n"
                                 f"    stdout(tail): {out_tail!r}"
                             )
@@ -625,20 +627,19 @@ class BacktestRunner:
                     self._print_result(parsed, line_id=my_id)
                     return parsed
 
-                # Silent-failure case: freqtrade ran (rc=0) but produced no
-                # parseable trades. ALWAYS log for random_baseline so 0-trade
-                # pool runs surface — silent return None is a black box otherwise.
+                # rc=0 but no parseable trades — common for filter-strict
+                # signals on quiet pairs. Show as one-liner so IDs don't jump
+                # silently; debug adds the stdout tail for diagnosis.
+                n_tr = (parsed or {}).get("trades", 0)
+                parsed_ok = parsed is not None
+                self._print_error(
+                    my_id, signal.name, pair, actual_tf,
+                    f"rc=0 trades={n_tr} (parsed={parsed_ok})",
+                )
                 if signal.signal_type == "random_baseline" or self.debug:
-                    n_tr = (parsed or {}).get("trades", 0)
-                    parsed_ok = parsed is not None
                     out_tail = (result.stdout or "")[-300:]
                     with print_lock:
-                        print(
-                            f"  ⚠ {signal.name} ({pair} {actual_tf}) rc=0 but "
-                            f"trades={n_tr} (parsed={parsed_ok}) → no usable result"
-                        )
-                        if self.debug:
-                            print(f"    stdout(tail): {out_tail!r}")
+                        print(f"    stdout(tail): {out_tail!r}")
                 return None
 
             except subprocess.TimeoutExpired:
@@ -649,23 +650,20 @@ class BacktestRunner:
                     self.retries_total += 1
                     continue
                 else:
-                    self._bump_completed()
+                    my_id = self._bump_completed()
+                    self._print_error(my_id, signal.name, pair, actual_tf, "timeout (retries exhausted)")
                     return None
 
             except Exception as e:
-                self._bump_completed()
-                # ALWAYS log random_baseline exceptions (e.g., FileNotFoundError
-                # when freqtrade isn't on PATH). These failures cascade into
-                # 0 pools / 0 p-values, which is hard to diagnose without logs.
-                if signal.signal_type == "random_baseline" or self.debug:
-                    with print_lock:
-                        print(
-                            f"  💥 {signal.name} ({pair} {timeframe}): "
-                            f"{type(e).__name__}: {e}"
-                        )
+                my_id = self._bump_completed()
+                self._print_error(
+                    my_id, signal.name, pair, actual_tf,
+                    f"{type(e).__name__}: {e!s:.80s}",
+                )
                 return None
 
-        self._bump_completed()
+        my_id = self._bump_completed()
+        self._print_error(my_id, signal.name, pair, actual_tf, "retry loop exhausted (no result)")
         return None
 
     def _calculate_delay(self, attempt: int) -> float:
@@ -1409,6 +1407,20 @@ class BacktestRunner:
                 f"PnL={r['profit_pct']:+6.1f}% "
                 f"CAL={r.get('calmar', 0) or 0:+6.2f} │ "
                 f"p={pv_str}{marker} (adj={adj_str})"
+            )
+
+    def _print_error(self, line_id: int, signal_name: str, pair: str, tf: str, reason: str):
+        """One-liner for failed backtests, same column structure as success.
+
+        Used for hard failures (rc!=0, signal kill, timeout, exception). NOT
+        used for `rc=0 with 0 trades` — that's expected for filter-strict
+        signals on quiet pairs and would just clutter the output. The
+        verbose stderr/stdout dump remains gated behind --debug.
+        """
+        with print_lock:
+            print(
+                f"  ❌ [{line_id:3d}/{self.total}] "
+                f"{signal_name:<35} {short_pair(pair):<6} {tf:<4} │ {reason}"
             )
 
     def _print_result(self, r: Dict, line_id: Optional[int] = None):
