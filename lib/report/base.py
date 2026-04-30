@@ -14,13 +14,11 @@ from .sections.regime import (
     print_signal_regime_matrix,
 )
 from .sections.exit_analysis import print_exit_analysis
-from .sections.temporal import print_temporal_analysis
 from .sections.rankings import print_top_by_sharpe
 from .sections.recommendations import print_recommendations
 from .sections.coin import (
     print_per_coin_summary,
     print_coin_comparison_matrix,
-    print_consistent_performers,
 )
 from .sections.winners import print_winners
 from .sections.drill_down import print_drill_down
@@ -56,6 +54,10 @@ class ReportGenerator:
         print_global_metrics(self.df)
         # Winners first: surfaces FDR-significant methods immediately so the
         # user doesn't have to triangulate across 6 sections to find them.
+        # The Tier-1/Tier-2 + cross-coin + temporal sub-blocks subsume the
+        # legacy `print_consistent_performers` (cross-coin) and 2 of the 3
+        # legacy `print_temporal_analysis` sub-blocks (top consistency, top
+        # robust). Both legacy calls removed below.
         print_winners(self.df, top_n=top_n)
         # Drill-down on top 10 deduped: per-month (with intra-month DD +
         # market change) and per-regime — answers "is it robust or a fluke?"
@@ -64,12 +66,10 @@ class ReportGenerator:
         print_regime_performance(self.df)
         print_signal_regime_matrix(self.df)
         print_exit_analysis(self.df)
-        print_temporal_analysis(self.df, self.config)
         print_top_by_sharpe(self.df, top_n)
         if "pair" in self.df.columns and self.df["pair"].nunique() > 1:
             print_per_coin_summary(self.df, top_n=5)
             print_coin_comparison_matrix(self.df)
-            print_consistent_performers(self.df, min_coins=2)
         print_recommendations(self.df, self.config)
 
         print(f"\n{'=' * 120}")
