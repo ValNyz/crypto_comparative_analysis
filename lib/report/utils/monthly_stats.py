@@ -70,6 +70,53 @@ def compute_monthly_breakdown(trades_df: pd.DataFrame) -> List[Dict]:
     return rows
 
 
+def compute_quarterly_breakdown(trades_df: pd.DataFrame) -> List[Dict]:
+    """Per-calendar-quarter aggregates from the trade list.
+
+    Same engine as `compute_monthly_breakdown` but bucketed by calendar
+    quarter (YYYY-Qn). Used to expose regime stability at a longer horizon
+    where per-trade Sharpe becomes statistically readable (n>=20-30 trades).
+    Sharpe here is trade-level (mean/std of profit_ratio) — NOT annualized,
+    but consistent scale across quarters for direct comparison.
+
+    Returns rows with: quarter, profit_pct, trades, sharpe, max_dd_pct.
+    """
+    if trades_df is None or len(trades_df) == 0:
+        return []
+    if "close_date" not in trades_df.columns or "profit_ratio" not in trades_df.columns:
+        return []
+    df = trades_df.copy()
+    df["close_date"] = pd.to_datetime(df["close_date"], utc=True, errors="coerce")
+    df = df.dropna(subset=["close_date"]).sort_values("close_date")
+    if len(df) == 0:
+        return []
+    # tz_convert(None) drops tz info — required by to_period() which only
+    # accepts naive timestamps. Date semantics preserved (UTC).
+    df["quarter"] = df["close_date"].dt.tz_convert(None).dt.to_period("Q").astype(str)
+
+    rows: List[Dict] = []
+    for q, grp in df.groupby("quarter", sort=True):
+        ratios = grp["profit_ratio"].astype(float).values
+        n = len(ratios)
+        mu = float(ratios.mean()) if n else 0.0
+        sd = float(ratios.std(ddof=1)) if n > 1 else 0.0
+        sharpe = (mu / sd) if sd > 0 else float("nan")
+        cum = np.cumprod(1.0 + ratios)
+        peak = np.maximum.accumulate(cum)
+        dd = (cum - peak) / peak
+        max_dd_pct = float(dd.min() * 100) if len(dd) else 0.0
+        rows.append(
+            {
+                "quarter": str(q),
+                "profit_pct": float(ratios.sum() * 100),
+                "trades": n,
+                "sharpe": sharpe,
+                "max_dd_pct": max_dd_pct,
+            }
+        )
+    return rows
+
+
 def compute_monthly_market_change(
     pair: str, timeframe: str, data_dir: str
 ) -> Dict[str, float]:

@@ -22,6 +22,7 @@ from .sections.coin import (
 )
 from .sections.winners import print_winners
 from .sections.drill_down import print_drill_down
+from .sections.blacklist import print_blacklist
 from .formatters import print_header
 
 
@@ -71,6 +72,10 @@ class ReportGenerator:
             print_per_coin_summary(self.df, top_n=5)
             print_coin_comparison_matrix(self.df)
         print_recommendations(self.df, self.config)
+        # Blacklist last: actionable cleanup the user pastes back into
+        # the YAML grid before the next run. Empty when no signal is bad
+        # enough to flag.
+        print_blacklist(self.df)
 
         print(f"\n{'=' * 120}")
 

@@ -21,6 +21,7 @@ from typing import Optional, Dict, List
 from ..formatters import print_header
 from ..utils.monthly_stats import (
     compute_monthly_breakdown,
+    compute_quarterly_breakdown,
     compute_monthly_market_change,
     build_export_index,
     extract_trades_from_zip_safe,
@@ -115,14 +116,24 @@ def _print_one_drill(
         f"MKT={r.get('market_change_pct', 0):+.1f}%"
     )
 
-    # Try to enrich monthly table with intra-month DD + market change
-    # by extracting trades from the export zip. Falls back to df arrays
-    # when the zip can't be located (e.g., cleared backtest_results/).
-    monthly_rows = _try_compute_enriched_monthly(
-        r, export_index, data_dir, timerange
-    )
-    if monthly_rows:
-        _print_enriched_monthly_table(monthly_rows)
+    # Extract per-trade detail once (used by both monthly and quarterly).
+    trades_df = _try_extract_drill_trades(r, export_index, timerange)
+    if trades_df is not None:
+        monthly_rows = compute_monthly_breakdown(trades_df)
+        if monthly_rows and data_dir:
+            mkt = compute_monthly_market_change(
+                str(r["pair"]), str(r["timeframe"]), data_dir
+            )
+            for row in monthly_rows:
+                row["market_pct"] = mkt.get(row["month"], None)
+        if monthly_rows:
+            _print_enriched_monthly_table(monthly_rows)
+            # Quarterly Sharpe: regime-stability indicator at horizon where
+            # trade-level Sharpe stops being noise (n>=20-30 trades).
+            quarterly_rows = compute_quarterly_breakdown(trades_df)
+            _print_quarterly_table(quarterly_rows)
+        else:
+            _print_monthly_table_from_df(r)
     else:
         _print_monthly_table_from_df(r)
 
@@ -130,17 +141,20 @@ def _print_one_drill(
     _print_regime_table(r)
 
 
-def _try_compute_enriched_monthly(
+def _try_extract_drill_trades(
     r: pd.Series,
     export_index: Optional[Dict],
-    data_dir: Optional[str],
     timerange: Optional[str],
-) -> Optional[List[Dict]]:
+):
+    """Locate this strategy's export zip and extract its trades DataFrame.
+
+    Returns None when the zip can't be found (e.g., backtest_results/ was
+    cleared) — caller falls back to df-aggregated arrays.
+    """
     if export_index is None or timerange is None:
         return None
     sig_name = str(r["signal"])
     tf = str(r["timeframe"])
-    pair = str(r["pair"])
     class_name = f"S_{sanitize_class_name(sig_name)}_{tf}"
     zip_path = export_index.get((class_name, tf, timerange))
     if zip_path is None:
@@ -148,14 +162,7 @@ def _try_compute_enriched_monthly(
     trades = extract_trades_from_zip_safe(zip_path, class_name)
     if trades is None or len(trades) == 0:
         return None
-    rows = compute_monthly_breakdown(trades)
-    if not rows:
-        return None
-    if data_dir:
-        mkt = compute_monthly_market_change(pair, tf, data_dir)
-        for row in rows:
-            row["market_pct"] = mkt.get(row["month"], None)
-    return rows
+    return trades
 
 
 def _print_enriched_monthly_table(rows: List[Dict]) -> None:
@@ -173,6 +180,29 @@ def _print_enriched_monthly_table(rows: List[Dict]) -> None:
             f"       {row['month']:<8} {row['profit_pct']:<+8.1f} "
             f"{mkt_s:<8} {row['trades']:<5d} {row['win_rate']:<6.1f} "
             f"{pf_s:<6} {row['max_dd_pct']:<+7.1f}"
+        )
+
+
+def _print_quarterly_table(rows: List[Dict]) -> None:
+    """Sharpe-per-quarter view. Skipped when only 1 quarter — no stability info.
+
+    Sharpe column is trade-level (mean/std of profit_ratio), not annualized.
+    Comparable across quarters at face value: a stable strat shows ~constant
+    Sharpe; a regime-shift victim shows e.g. +1.5 in 2024Q4 then -0.4 in
+    2025Q2.
+    """
+    if not rows or len(rows) < 2:
+        return
+    print(
+        f"\n       {'Trim':<8} {'PnL%':<8} {'Tr':<5} {'SH':<7} {'DD%':<7}"
+    )
+    print("       " + "─" * 38)
+    for row in rows:
+        sh = row["sharpe"]
+        sh_s = f"{sh:+.2f}" if not pd.isna(sh) else "  n/a "
+        print(
+            f"       {row['quarter']:<8} {row['profit_pct']:<+8.1f} "
+            f"{row['trades']:<5d} {sh_s:<7} {row['max_dd_pct']:<+7.1f}"
         )
 
 

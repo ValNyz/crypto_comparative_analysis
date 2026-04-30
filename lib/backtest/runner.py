@@ -1266,7 +1266,7 @@ class BacktestRunner:
                 f"{r['signal']:<35} {short_pair(r['pair']):<6} {r['timeframe']:<4} │ "
                 f"Tr={total_tr:>4d} ({long_n:>3d}L/{short_n:>3d}S) "
                 f"PnL={r['profit_pct']:+6.1f}% "
-                f"Sharpe={r['sharpe']:+5.2f} │ "
+                f"SH={r['sharpe']:+5.2f} │ "
                 f"p={pv_str}{marker} (adj={adj_str})"
             )
 
@@ -1357,7 +1357,7 @@ class BacktestRunner:
                 f"{pnl_part} "
                 f"{mkt_part} "
                 f"{dd_part} "
-                f"Sharpe={r['sharpe']:+5.2f}"
+                f"SH={r['sharpe']:+5.2f}"
                 f"{p_part}"
             )
 
