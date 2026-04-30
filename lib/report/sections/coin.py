@@ -57,10 +57,10 @@ def print_per_coin_summary(df: pd.DataFrame, top_n: int = 5):
 
         print(
             f"\n  {'#':<3} {'Signal':<30} {'TF':<4} │ "
-            f"{'Tr':<4} {'WR%':<6} {'PnL%':<8} {'Calmar':<7} {'PF':<6} "
+            f"{'Tr':<4} {'WR%':<6} {'PnL%':<8} {'Calmar':<7} {'PF':<6} {'Cons%':<6} "
             f"{'μ_m':<6} {'σ_m':<6} │ {'Exit':<12}"
         )
-        print("  " + "─" * 116)
+        print("  " + "─" * 123)
 
         for i, (_, r) in enumerate(top.iterrows(), 1):
             exit_cfg = r.get("exit_config", "none")
@@ -71,10 +71,11 @@ def print_per_coin_summary(df: pd.DataFrame, top_n: int = 5):
             cal = r.get("calmar", 0) or 0
             pf = r.get("profit_factor", 0) or 0
             pf_s = f"{pf:<6.2f}" if pf != float("inf") else "  inf"
+            cons = r.get("consistency", 0) or 0
             print(
                 f"  {i:<3} {r['signal']:<30} {r['timeframe']:<4} │ "
                 f"{r['trades']:<4} {r['win_rate']:<6.1f} {r['profit_pct']:<+8.1f} "
-                f"{cal:<+7.2f} {pf_s} {mu_m:<+6.1f} {sd_m:<6.1f} │ {exit_cfg:<12}"
+                f"{cal:<+7.2f} {pf_s} {cons:<6.0f} {mu_m:<+6.1f} {sd_m:<6.1f} │ {exit_cfg:<12}"
             )
 
 
