@@ -21,7 +21,7 @@ import numpy as np
 from ..signals.base import SignalConfig
 from ..generation.generator import StrategyGenerator
 from ..utils.logging import print_lock
-from ..utils.colors import color_sharpe, color_dd, color_pvalue
+from ..utils.colors import color_sharpe, color_dd, color_pvalue, color_pnl_composite
 from ..utils.helpers import short_pair, sanitize_class_name
 from ..null_pool import (
     compute_cache_key,
@@ -1381,9 +1381,14 @@ class BacktestRunner:
                     pnl_l = r["profit_pct"]
                 elif sig_dir == "short":
                     pnl_s = r["profit_pct"]
-            pnl_part = (
-                f"PnL={r['profit_pct']:+6.1f}%(L:{pnl_l:+5.1f}%/S:{pnl_s:+5.1f}%)"
+            # Composite color on global PnL: green only when both DD AND p
+            # reach their threshold (bold when both at strict).
+            pnl_global = color_pnl_composite(
+                f"{r['profit_pct']:+6.1f}%",
+                dd=r["max_dd_pct"],
+                p=r.get("p_value"),
             )
+            pnl_part = f"PnL={pnl_global}(L:{pnl_l:+5.1f}%/S:{pnl_s:+5.1f}%)"
 
             # Tag prefix:
             #   🎲 = null-pool random_baseline build

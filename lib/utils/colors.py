@@ -73,3 +73,25 @@ def color_pvalue(value, formatted: str) -> str:
     if v <= 0.05:
         return _wrap(formatted, "green")
     return formatted
+
+
+def color_pnl_composite(formatted: str, dd, p) -> str:
+    """PnL colored only when BOTH DD and p reach thresholds simultaneously.
+
+    Bold green when both at the strictest threshold: DD < 5% AND p ≤ 0.01.
+    Green when both at the lighter threshold: DD < 10% AND p ≤ 0.05.
+    Else neutral. The composite gate avoids highlighting PnL on strats that
+    look profitable but with high DD or weak significance.
+    """
+    if dd is None or p is None:
+        return formatted
+    try:
+        d = float(dd)
+        pv = float(p)
+    except (TypeError, ValueError):
+        return formatted
+    if d < 5.0 and pv <= 0.01:
+        return _wrap(formatted, "bold green")
+    if d < 10.0 and pv <= 0.05:
+        return _wrap(formatted, "green")
+    return formatted
