@@ -32,6 +32,10 @@ class Config:
     min_trades: int = 0
     min_sharpe: float = -2
     min_months: int = 2
+    # Frequency floor: drop strats with avg trade-rate below this from the
+    # report. A signal that fires <2x/month over the timerange is too
+    # sparse for stable Sharpe / p-value estimates. Use 0.0 to disable.
+    min_trades_per_month: float = 2.0
     max_workers: int = 6
 
     # Wallet/Position

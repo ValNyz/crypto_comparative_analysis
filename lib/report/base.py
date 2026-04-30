@@ -51,6 +51,11 @@ class ReportGenerator:
             print("\n❌ Aucun résultat valide!")
             return
 
+        self._filter_low_frequency()
+        if len(self.df) == 0:
+            print("\n❌ Tous les résultats ont été filtrés (< trades/mois)!")
+            return
+
         self._print_header()
         print_global_metrics(self.df)
         # Winners first: surfaces FDR-significant methods immediately so the
@@ -78,6 +83,31 @@ class ReportGenerator:
         print_blacklist(self.df)
 
         print(f"\n{'=' * 120}")
+
+    def _filter_low_frequency(self):
+        """Drop rows with avg trade rate below `config.min_trades_per_month`.
+
+        Applied once before any section runs. Sparse strats (e.g., 8 trades
+        on 12 months = 0.67/mo) produce unstable Sharpe and p-values; better
+        to remove them than to display misleading rankings.
+        """
+        threshold = float(getattr(self.config, "min_trades_per_month", 0.0) or 0.0)
+        if threshold <= 0:
+            return
+        if "trades" not in self.df.columns or "months_total" not in self.df.columns:
+            return
+        before = len(self.df)
+        months = self.df["months_total"].fillna(0).astype(float)
+        trades = self.df["trades"].fillna(0).astype(float)
+        rate = trades / months.where(months > 0, other=1.0)
+        keep = (months > 0) & (rate >= threshold)
+        self.df = self.df[keep].copy()
+        dropped = before - len(self.df)
+        if dropped > 0:
+            print(
+                f"\n  Filtre fréquence: {dropped}/{before} strats retirées "
+                f"(< {threshold:g} trades/mois)"
+            )
 
     def _print_header(self):
         """Print report header."""
