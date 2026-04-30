@@ -188,3 +188,46 @@ def bh_adjusted_pvalues(pvalues) -> np.ndarray:
     out = np.empty(n)
     out[order] = adjusted_sorted
     return out
+
+
+def estimate_pi0(pvalues, lambda_: float = 0.5) -> float:
+    """Estimate the proportion of true-null hypotheses (Storey 2002).
+
+    Under H0 only, p-values are uniform on [0, 1]. So P(p > λ) = (1 - λ)
+    and #(p > λ) / N estimates π₀ × (1 - λ). The estimate is clipped to
+    [1e-3, 1.0] to avoid divide-by-zero downstream when the right tail is
+    empty (a degenerate case where Storey would equal BH anyway).
+
+    λ=0.5 is the standard pragmatic choice — small enough to use most of
+    the histogram's right side, large enough that contamination by H1 in
+    the bin is negligible.
+    """
+    p = np.asarray(pvalues, dtype=float)
+    n = len(p)
+    if n == 0:
+        return 1.0
+    n_above = int((p > lambda_).sum())
+    pi0 = n_above / ((1.0 - lambda_) * n) if lambda_ < 1.0 else 1.0
+    return float(min(1.0, max(1e-3, pi0)))
+
+
+def storey_q_values(pvalues, lambda_: float = 0.5) -> np.ndarray:
+    """Storey q-values: BH × π₀ for less conservative FDR control.
+
+    When some tests have a real edge (π₀ < 1), BH over-corrects by treating
+    all N tests as potentially null. Storey rescales by the estimated π₀ to
+    recover power without inflating expected FDR. Always q ≤ p_adj_BH, so
+    using q never excludes a strat BH would have kept — only adds borderline
+    rejections.
+
+    Validity requires that p-values are uniform on [0, 1] under H0. If the
+    bootstrap is mis-calibrated (block_len too short, autocorrelated trades),
+    the histogram won't be flat and π₀ becomes meaningless. Verify on the
+    p-value histogram before trusting the q-value column.
+    """
+    p = np.asarray(pvalues, dtype=float)
+    if len(p) == 0:
+        return p
+    pi0 = estimate_pi0(p, lambda_=lambda_)
+    bh = bh_adjusted_pvalues(p)
+    return np.minimum(bh * pi0, 1.0)

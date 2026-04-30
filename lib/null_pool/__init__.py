@@ -22,7 +22,13 @@ from .pool_builder import (
     save_pool,
     extract_trades_from_zip,
 )
-from .bootstrap import pvalue_vs_null, pvalue_vs_null_mixed, bh_adjusted_pvalues
+from .bootstrap import (
+    pvalue_vs_null,
+    pvalue_vs_null_mixed,
+    bh_adjusted_pvalues,
+    storey_q_values,
+    estimate_pi0,
+)
 
 __all__ = [
     "compute_cache_key",
@@ -32,4 +38,6 @@ __all__ = [
     "pvalue_vs_null",
     "pvalue_vs_null_mixed",
     "bh_adjusted_pvalues",
+    "storey_q_values",
+    "estimate_pi0",
 ]

@@ -14,6 +14,7 @@ def print_global_metrics(df: pd.DataFrame):
     # Significance counts (filled when null pool ran)
     has_p = "p_value" in df.columns and df["p_value"].notna().any()
     has_padj = "p_value_adj" in df.columns and df["p_value_adj"].notna().any()
+    has_q = "q_value" in df.columns and df["q_value"].notna().any()
     n_sig_raw = (
         int(((df["p_value"].notna()) & (df["p_value"] < 0.05)).sum()) if has_p else 0
     )
@@ -22,12 +23,17 @@ def print_global_metrics(df: pd.DataFrame):
         if has_padj
         else 0
     )
+    n_sig_q = (
+        int(((df["q_value"].notna()) & (df["q_value"] < 0.05)).sum())
+        if has_q
+        else 0
+    )
 
     sig_line = ""
     if has_p:
         sig_line = (
             f"│  Significatifs p<0.05:  {n_sig_raw:<6} brut "
-            f"/ {n_sig_adj:<3} après FDR                    │\n"
+            f"/ {n_sig_adj:<3} BH-FDR / {n_sig_q:<3} Storey q          │\n"
         )
 
     print(f"""

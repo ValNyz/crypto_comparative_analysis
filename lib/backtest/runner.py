@@ -30,6 +30,8 @@ from ..null_pool import (
     pvalue_vs_null,
     pvalue_vs_null_mixed,
     bh_adjusted_pvalues,
+    storey_q_values,
+    estimate_pi0,
 )
 from .parser import parse_freqtrade_output
 
@@ -1124,14 +1126,26 @@ class BacktestRunner:
 
         df = df.copy()
         df["p_value"] = pvals
-        # BH-FDR adjustment over non-NaN p-values only
+        # BH-FDR + Storey q-values over non-NaN p-values only.
+        # BH stays the conservative reference; q-value (BH × π₀) recovers
+        # power when many tests have a real edge. Always q ≤ p_adj_BH.
         valid = df["p_value"].notna()
         if valid.sum() > 0:
-            adj = bh_adjusted_pvalues(df.loc[valid, "p_value"].values)
+            p_valid = df.loc[valid, "p_value"].values
+            adj = bh_adjusted_pvalues(p_valid)
+            q = storey_q_values(p_valid)
+            pi0 = estimate_pi0(p_valid)
             df["p_value_adj"] = float("nan")
+            df["q_value"] = float("nan")
             df.loc[valid, "p_value_adj"] = adj
+            df.loc[valid, "q_value"] = q
+            print(
+                f"  Storey: pi0={pi0:.3f} estime, q_value = BH x {pi0:.3f} "
+                f"(plus permissif que BH si pi0 < 1)"
+            )
         else:
             df["p_value_adj"] = float("nan")
+            df["q_value"] = float("nan")
         return df
 
     # ============================================================

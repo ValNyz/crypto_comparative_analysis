@@ -46,8 +46,17 @@ def print_winners(df: pd.DataFrame, top_n: int = 50, min_trades: int = RANK_MIN_
     )
 
     if has_pvals:
+        # Total variants per (signal, pair, tf) — denominator of n_var ratio.
+        # Computed on the FULL trade-floor-filtered df, before significance gates.
+        total_var = (
+            df_f.groupby(["signal", "pair", "timeframe"]).size().rename("n_total")
+            if {"signal", "pair", "timeframe"}.issubset(df_f.columns)
+            else None
+        )
+
         tier1 = df_f[(df_f["p_value_adj"].notna()) & (df_f["p_value_adj"] < 0.05)]
         tier1 = tier1.sort_values(["p_value_adj", "sharpe"], ascending=[True, False])
+        tier1 = _dedup_with_count(tier1, total_var)
 
         tier2 = df_f[
             (df_f["p_value"].notna())
@@ -55,6 +64,7 @@ def print_winners(df: pd.DataFrame, top_n: int = 50, min_trades: int = RANK_MIN_
             & ((df_f["p_value_adj"].isna()) | (df_f["p_value_adj"] >= 0.05))
         ]
         tier2 = tier2.sort_values(["p_value", "sharpe"], ascending=[True, False])
+        tier2 = _dedup_with_count(tier2, total_var)
 
         if len(tier1) > 0:
             print(
@@ -91,6 +101,40 @@ def print_winners(df: pd.DataFrame, top_n: int = 50, min_trades: int = RANK_MIN_
         print(f"     Ranking par Sharpe pur (N≥{min_trades}) :\n")
         top = df_f.nlargest(top_n, "sharpe")
         _print_block(top, show_pvals=False)
+
+
+def _dedup_with_count(
+    sub: pd.DataFrame, total_var: pd.Series | None
+) -> pd.DataFrame:
+    """Keep best (already pre-sorted) row per (signal, pair, tf) and tag n_var.
+
+    `n_var` = "X/Y" where X = FDR-sig variants in the group (or rows in `sub`),
+    Y = total variants tested for that combo (from `total_var`). Surfaces
+    parameter-robustness: 9/9 means every exit/SL variant of this combo passed
+    FDR → very robust ; 2/9 means it's an edge case dependent on specific
+    exit/SL params.
+    """
+    if len(sub) == 0 or not {"signal", "pair", "timeframe"}.issubset(sub.columns):
+        sub = sub.copy()
+        sub["n_var"] = ""
+        return sub
+    n_sig = sub.groupby(["signal", "pair", "timeframe"]).size().rename("_n_sig")
+    deduped = sub.drop_duplicates(
+        subset=["signal", "pair", "timeframe"], keep="first"
+    ).copy()
+    deduped = deduped.merge(n_sig, on=["signal", "pair", "timeframe"], how="left")
+    if total_var is not None:
+        deduped = deduped.merge(
+            total_var, on=["signal", "pair", "timeframe"], how="left"
+        )
+        deduped["n_var"] = deduped.apply(
+            lambda r: f"{int(r['_n_sig'])}/{int(r['n_total'])}", axis=1
+        )
+        deduped = deduped.drop(columns=["_n_sig", "n_total"])
+    else:
+        deduped["n_var"] = deduped["_n_sig"].astype(int).astype(str)
+        deduped = deduped.drop(columns=["_n_sig"])
+    return deduped
 
 
 def _print_cross_coin_robustness(df: pd.DataFrame, top_n: int = 50):
@@ -204,9 +248,9 @@ def _print_temporal_robustness(df: pd.DataFrame, top_n: int = 50):
     print(
         f"\n  {'#':<3} {'Signal':<30} {'Pair':<6} {'TF':<4} │ "
         f"{'Sharpe':<7} {'Cons%':<6} {'Mois+':<6} {'PnL%':<7} "
-        f"{'p':<6} {'p_adj':<6} {'Score':<7}"
+        f"{'p':<6} {'p_adj':<6} {'q':<6} {'Score':<7}"
     )
-    print("  " + "─" * 110)
+    print("  " + "─" * 117)
     for i, (_, r) in enumerate(df_t.head(top_n).iterrows(), 1):
         cons = r.get("consistency", 0) or 0
         m_prof = r.get("months_profitable", 0) or 0
@@ -218,11 +262,13 @@ def _print_temporal_robustness(df: pd.DataFrame, top_n: int = 50):
             if pv_adj is not None and not pd.isna(pv_adj)
             else " n/a "
         )
+        qv = r.get("q_value")
+        q_s = f"{qv:.3f}" if qv is not None and not pd.isna(qv) else " n/a "
         print(
             f"  {i:<3} {r['signal']:<30} {short_pair(r['pair']):<6} "
             f"{r['timeframe']:<4} │ "
             f"{r['sharpe']:<+7.2f} {cons:<6.0f} {mois:<6} "
-            f"{r['profit_pct']:<+7.1f} {r['p_value']:<6.3f} {adj_s:<6} "
+            f"{r['profit_pct']:<+7.1f} {r['p_value']:<6.3f} {adj_s:<6} {q_s:<6} "
             f"{r['robust_score']:<7.1f}"
         )
 
@@ -236,9 +282,9 @@ def _print_block(rows: pd.DataFrame, show_pvals: bool = True):
         header = (
             f"\n  {'#':<3} {'Signal':<30} {'Pair':<6} {'TF':<4} {'Exit':<14} │ "
             f"{'Tr':<4} {'PnL%':<7} {'Sharpe':<7} {'DD%':<5} {'Cons%':<5} │ "
-            f"{'p':<6} {'p_adj':<6}"
+            f"{'p':<6} {'p_adj':<6} {'q':<6} {'n_var':<6}"
         )
-        sep_w = 130
+        sep_w = 144
     else:
         header = (
             f"\n  {'#':<3} {'Signal':<30} {'Pair':<6} {'TF':<4} {'Exit':<14} │ "
@@ -263,14 +309,19 @@ def _print_block(rows: pd.DataFrame, show_pvals: bool = True):
         if show_pvals:
             pv = r.get("p_value")
             pv_adj = r.get("p_value_adj")
+            qv = r.get("q_value")
             pv_s = f"{pv:.3f}" if pv is not None and not pd.isna(pv) else " n/a "
             adj_s = (
                 f"{pv_adj:.3f}"
                 if pv_adj is not None and not pd.isna(pv_adj)
                 else " n/a "
             )
+            q_s = (
+                f"{qv:.3f}" if qv is not None and not pd.isna(qv) else " n/a "
+            )
             marker = ""
             if pv is not None and not pd.isna(pv):
                 marker = "*" if pv < 0.05 else ("•" if pv < 0.10 else " ")
-            line += f" │ {pv_s}{marker} {adj_s}"
+            n_var_s = str(r.get("n_var", "") or "")
+            line += f" │ {pv_s}{marker} {adj_s} {q_s} {n_var_s:<6}"
         print(line)
