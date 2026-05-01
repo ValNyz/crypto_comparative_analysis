@@ -284,17 +284,20 @@ def generate_custom_exit_method(exit_config: ExitConfig) -> str:
     elif exit_config.use_trailing_roi:
         activate = exit_config.trail_activate_pct
         distance = exit_config.trail_distance_pct
-        # Track peak via current_profit (freqtrade's profit_ratio including fees/leverage)
-        # rather than reconstructing from open_rate/max_rate (which had unit-mismatch bugs).
-        # Peak is stashed on trade.__dict__ — persists across custom_exit calls within the trade.
+        # Use trade.max_rate (long) / trade.min_rate (short): freqtrade tracks
+        # the intra-bar peak HIGH / trough LOW across all bars seen by the trade
+        # and updates these BEFORE invoking custom_exit (no lookahead).
+        # `trade.calc_profit_ratio(rate)` converts a price into the same profit
+        # ratio units as `current_profit`, handling fees/leverage/direction.
+        # Previous version used current_profit at OPEN, which missed intra-bar
+        # peaks that ROI saw — trailing rarely armed before ROI fired.
         lines += [
             f"{ind}{ind}activate, distance = {activate}, {distance}",
-            f"{ind}{ind}prev_peak = float(getattr(trade, '_peak_profit', -10.0))",
-            f"{ind}{ind}peak = max(prev_peak, float(current_profit))",
-            f"{ind}{ind}try:",
-            f"{ind}{ind}{ind}trade._peak_profit = peak  # type: ignore",
-            f"{ind}{ind}except Exception:",
-            f"{ind}{ind}{ind}pass",
+            f"{ind}{ind}if trade.is_short:",
+            f"{ind}{ind}{ind}peak_rate = trade.min_rate if trade.min_rate else trade.open_rate",
+            f"{ind}{ind}else:",
+            f"{ind}{ind}{ind}peak_rate = trade.max_rate if trade.max_rate else trade.open_rate",
+            f"{ind}{ind}peak = float(trade.calc_profit_ratio(peak_rate))",
             f"{ind}{ind}if peak < activate:",
             f"{ind}{ind}{ind}return None",
             f"{ind}{ind}if current_profit < peak - distance:",

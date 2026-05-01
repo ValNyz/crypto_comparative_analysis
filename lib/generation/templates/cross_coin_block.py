@@ -11,12 +11,15 @@ CROSS_COIN_LOADERS_BLOCK = '''
     def load_coin_ohlcv(self, coin: str, interval: str, reference_df: pd.DataFrame) -> pd.DataFrame:
         """Load OHLCV feather for a coin at given interval. Returns empty df if absent.
 
-        Reuses DATA_DIR (already declared by funding template). Tries 3 filename patterns.
+        Reuses DATA_DIR (already declared by funding template). Tries USDC and USDT patterns.
         """
         for pattern in [
             f"{{coin}}_USDC_USDC-{{interval}}-futures.feather",
             f"{{coin}}_USDC-{{interval}}-futures.feather",
             f"{{coin}}_USDC_USDC-{{interval}}.feather",
+            f"{{coin}}_USDT_USDT-{{interval}}-futures.feather",
+            f"{{coin}}_USDT-{{interval}}-futures.feather",
+            f"{{coin}}_USDT_USDT-{{interval}}.feather",
         ]:
             path = self.DATA_DIR / pattern
             if path.exists():
@@ -44,6 +47,9 @@ CROSS_COIN_LOADERS_BLOCK = '''
             f"{{ref_coin}}_USDC_USDC-1h-funding_rate.feather",
             f"{{ref_coin}}_USDC_USDC-8h-funding_rate.feather",
             f"{{ref_coin}}_USDC-1h-funding_rate.feather",
+            f"{{ref_coin}}_USDT_USDT-1h-funding_rate.feather",
+            f"{{ref_coin}}_USDT_USDT-8h-funding_rate.feather",
+            f"{{ref_coin}}_USDT-1h-funding_rate.feather",
         ]:
             path = self.DATA_DIR / pattern
             if path.exists():
@@ -69,11 +75,34 @@ CROSS_COIN_LOADERS_BLOCK = '''
         return pd.DataFrame()
 
     def merge_btc_regime(self, dataframe: pd.DataFrame) -> pd.DataFrame:
-        """Compute BTC daily regime, merge into dataframe. Adds 'btc_regime' (categorical)."""
+        """Compute BTC daily regime, merge into dataframe. Adds 'btc_regime' (categorical).
+
+        Falls back to resampling BTC 1h to 1d when no 1d feather exists in DATA_DIR
+        (common when running on a Binance-style data dir that ships only 1h/30m/etc.).
+        Logs a warning if neither 1d nor 1h is available — in that case the filter is
+        effectively disabled (all bars tagged 'neutral').
+        """
         btc_d = self.load_coin_ohlcv("BTC", "1d", dataframe)
         if btc_d.empty or "close" not in btc_d.columns:
-            dataframe["btc_regime"] = "neutral"
-            return dataframe
+            btc_h = self.load_coin_ohlcv("BTC", "1h", dataframe)
+            if not btc_h.empty and "close" in btc_h.columns:
+                idx = btc_h.set_index("date")
+                btc_d = idx.resample("1D").agg({{
+                    "open": "first",
+                    "high": "max",
+                    "low": "min",
+                    "close": "last",
+                }}).dropna(subset=["close"]).reset_index()
+            else:
+                if not getattr(self, "_btc_regime_warned", False):
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "BTC 1d/1h data not found in DATA_DIR=%s; btc_regime filter is "
+                        "disabled (all bars set to 'neutral').", str(self.DATA_DIR),
+                    )
+                    self._btc_regime_warned = True
+                dataframe["btc_regime"] = "neutral"
+                return dataframe
         btc_d = btc_d.sort_values("date").reset_index(drop=True)
         ret_7d = btc_d["close"].pct_change(7)
         vol_1d = btc_d["close"].pct_change().rolling(20).std()
