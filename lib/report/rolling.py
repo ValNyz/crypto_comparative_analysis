@@ -5,7 +5,7 @@
 
 import pandas as pd
 import numpy as np
-from typing import Optional
+from typing import List, Optional, Tuple, cast
 
 from .base import ReportGenerator
 from .formatters import print_header, print_section
@@ -20,6 +20,11 @@ class RollingReportGenerator(ReportGenerator):
     Hérite de ReportGenerator pour réutiliser les sections communes
     et ajoute les sections spécifiques à l'analyse de consistance.
     """
+
+    # Annotations pour le mode portfolio (build dans _build_portfolio_frames)
+    _strats: List[Tuple[str, str, str]]
+    _wide: pd.DataFrame
+    _port: pd.Series
 
     def __init__(
         self,
@@ -49,10 +54,18 @@ class RollingReportGenerator(ReportGenerator):
         )
 
     def print_full_report(self, top_n: int = 25, show_regime: bool = False):
-        """Affiche le rapport rolling complet (show_regime ignoré ici)."""
+        """Affiche le rapport rolling complet (show_regime ignoré ici).
+
+        Auto-routage: ≤ 5 signaux → mode portefeuille (dense, focalisé go/no-go
+        dry-run). Sinon → rapport grille classique.
+        """
         _ = show_regime  # signature compat with parent
         if len(self.consistency_df) == 0:
             print("\n❌ Aucun résultat de rolling backtest!")
+            return
+
+        if len(self.consistency_df) <= 5:
+            self._print_portfolio_report()
             return
 
         self._print_header()
@@ -80,6 +93,406 @@ class RollingReportGenerator(ReportGenerator):
         self._print_rolling_recommendations()
 
         print(f"\n{'=' * 120}")
+
+    # =========================================================================
+    # PORTFOLIO MODE — rapport dense pour décider d'un dry-run sur N strats (N≤5)
+    # =========================================================================
+
+    def _print_portfolio_report(self):
+        """Rapport focalisé pour valider un petit portefeuille avant dry-run."""
+        self._build_portfolio_frames()
+        self._print_portfolio_setup()
+        self._print_portfolio_per_strat_summary()
+        self._print_portfolio_per_window_table()
+        self._print_portfolio_correlation()
+        self._print_portfolio_worst_windows()
+        self._print_portfolio_stability_over_time()
+        self._print_portfolio_verdict()
+        print(f"\n{'=' * 120}")
+
+    def _build_portfolio_frames(self):
+        """Construit deux DataFrames intermédiaires partagés par les sections.
+
+        - self._strats : ordre stable des strats (= ordre du consistency_df).
+        - self._wide   : pivot window_idx × strat avec colonnes profit/calmar/dd
+                         + mkt_change_pct par fenêtre (commun aux strats).
+        - self._port   : Series equal-weight portfolio PnL par window_idx.
+        """
+        cdf = self.consistency_df.reset_index(drop=True)
+        rdf = self.raw_df
+
+        # Identité ordonnée des strats
+        self._strats = list(
+            zip(cdf["signal"].tolist(), cdf["pair"].tolist(), cdf["timeframe"].tolist())
+        )
+
+        if "window_idx" not in rdf.columns:
+            self._wide = pd.DataFrame()
+            self._port = pd.Series(dtype=float)
+            return
+
+        windows = sorted(rdf["window_idx"].unique())
+        rows = []
+        for w in windows:
+            row = {"window_idx": w}
+            wdf = rdf[rdf["window_idx"] == w]
+            label = wdf["window_label"].iloc[0] if "window_label" in wdf.columns and len(wdf) > 0 else f"W{w}"
+            row["window_label"] = label
+            row["mkt_change_pct"] = (
+                wdf["market_change_pct"].mean() if "market_change_pct" in wdf.columns else np.nan
+            )
+            for i, (sig, pair, tf) in enumerate(self._strats, 1):
+                m = (rdf["signal"] == sig) & (rdf["pair"] == pair) & (rdf["timeframe"] == tf) & (rdf["window_idx"] == w)
+                sub = rdf[m]
+                if len(sub) == 0:
+                    row[f"s{i}_profit"] = np.nan
+                    row[f"s{i}_calmar"] = np.nan
+                    row[f"s{i}_dd"] = np.nan
+                    row[f"s{i}_trades"] = 0
+                else:
+                    r = sub.iloc[0]
+                    row[f"s{i}_profit"] = float(r.get("profit_pct", 0) or 0)
+                    row[f"s{i}_calmar"] = float(r.get("calmar", 0) or 0)
+                    row[f"s{i}_dd"] = float(r.get("max_dd_pct", 0) or 0)
+                    row[f"s{i}_trades"] = int(r.get("trades", 0) or 0)
+            rows.append(row)
+
+        self._wide = pd.DataFrame(rows)
+
+        # Equal-weight: moyenne arithmétique des PnL strats par fenêtre
+        n = len(self._strats)
+        if n > 0 and len(self._wide) > 0:
+            cols = [f"s{i}_profit" for i in range(1, n + 1)]
+            mean_result = self._wide[cols].mean(axis=1)
+            self._port = pd.Series(np.asarray(mean_result, dtype=float))
+        else:
+            self._port = pd.Series(dtype=float)
+
+    def _print_portfolio_setup(self):
+        """Bloc d'entête : strats listées, période, n_windows, overlap."""
+        cdf = self.consistency_df
+        n = len(cdf)
+        overlap = max(0.0, (1 - self.step_months / self.window_months) * 100) if self.window_months else 0
+        print_header(f"🎯 RAPPORT PORTEFEUILLE ({n} strats × {self.n_windows} fenêtres)")
+        print(f"\n   Fenêtre {self.window_months}m / décalage {self.step_months}m / chevauchement {overlap:.0f}%")
+        if overlap >= 50:
+            print(f"   ⚠️  Overlap élevé : la dispersion entre fenêtres est sous-estimée.")
+        print()
+        for i, (sig, pair, tf) in enumerate(self._strats, 1):
+            row = cdf[(cdf["signal"] == sig) & (cdf["pair"] == pair) & (cdf["timeframe"] == tf)].iloc[0]
+            exit_cfg = row.get("exit_config", "none") or "none"
+            stype = row.get("signal_type", "") or ""
+            print(f"   S{i}  {sig:<48} {short_pair(pair)} {tf:<4} ({stype}, exit={exit_cfg})")
+
+    def _print_portfolio_per_strat_summary(self):
+        """Tableau compact: une colonne par strat, métriques en lignes."""
+        print_section("📊 SYNTHÈSE PAR STRATÉGIE")
+
+        cdf = self.consistency_df
+        rdf = self.raw_df
+
+        # Pré-calculs par strat
+        cols = []
+        for i, (sig, pair, tf) in enumerate(self._strats, 1):
+            cr = cdf[(cdf["signal"] == sig) & (cdf["pair"] == pair) & (cdf["timeframe"] == tf)].iloc[0]
+            sub = rdf[(rdf["signal"] == sig) & (rdf["pair"] == pair) & (rdf["timeframe"] == tf)]
+            n_w = int(cr.get("n_windows", 0))
+            n_prof = int((sub["profit_pct"] > 0).sum()) if len(sub) > 0 else 0
+            pl = float(cr.get("profit_long_sum", 0) or 0)
+            ps = float(cr.get("profit_short_sum", 0) or 0)
+            tot_ls = abs(pl) + abs(ps)
+            ls_split = (
+                f"{pl / (pl + ps) * 100:.0f}/{ps / (pl + ps) * 100:.0f}"
+                if (pl + ps) > 0 else (f"{pl / tot_ls * 100:+.0f}/{ps / tot_ls * 100:+.0f}" if tot_ls > 0 else "n/a")
+            )
+            cols.append({
+                "label": f"S{i}",
+                "trades": int(cr.get("trades_total", 0) or 0),
+                "wins": f"{n_prof}/{n_w}",
+                "pct_prof": float(cr.get("pct_profitable", 0) or 0),
+                "p_mean": float(cr.get("profit_mean", 0) or 0),
+                "p_std": float(cr.get("profit_std", 0) or 0),
+                "p_min": float(cr.get("profit_min", 0) or 0),
+                "p_max": float(cr.get("profit_max", 0) or 0),
+                "cal_mean": float(cr.get("calmar_mean", 0) or 0),
+                "cal_min": float(cr.get("calmar_min", 0) or 0),
+                "dd_worst": float(cr.get("dd_worst", 0) or 0),
+                "pf": float(cr.get("pf_mean", 0) or 0),
+                "ls": ls_split,
+                "sharpe": float(cr.get("sharpe_mean", 0) or 0),
+                "sharpe_std": float(cr.get("sharpe_std", 0) or 0),
+            })
+
+        col_w = 14
+        header = f"   {'Métrique':<22}" + "".join(f"{c['label']:>{col_w}}" for c in cols)
+        print(f"\n{header}")
+        print("   " + "─" * (22 + col_w * len(cols)))
+
+        def line(label, fmt):
+            cells = "".join(f"{fmt(c):>{col_w}}" for c in cols)
+            print(f"   {label:<22}{cells}")
+
+        line("Trades total",       lambda c: f"{c['trades']}")
+        line("Fenêtres profitab.", lambda c: f"{c['wins']} ({c['pct_prof']:.0f}%)")
+        line("PnL μ ± σ",          lambda c: f"{c['p_mean']:+.2f}±{c['p_std']:.2f}")
+        line("PnL min / max",      lambda c: f"{c['p_min']:+.1f}/{c['p_max']:+.1f}")
+        line("Calmar μ (min)",     lambda c: f"{c['cal_mean']:+.0f} ({c['cal_min']:+.0f})")
+        line("DD pire fenêtre",    lambda c: f"{c['dd_worst']:.1f}%")
+        line("Profit factor μ",    lambda c: f"{c['pf']:.2f}")
+        line("Sharpe μ ± σ",       lambda c: f"{c['sharpe']:+.2f}±{c['sharpe_std']:.2f}")
+        line("L/S split (PnL)",    lambda c: c['ls'])
+
+    def _print_portfolio_per_window_table(self):
+        """Tableau dense: une ligne par fenêtre, PnL par strat + portfolio eq-weight."""
+        if len(self._wide) == 0:
+            return
+
+        print_section("📅 DÉTAIL PAR FENÊTRE (PnL %, equal-weight)")
+
+        n = len(self._strats)
+        strat_w = 9
+        header = f"\n   {'W#':<3} {'Période':<22} {'Mkt%':>7}  │ "
+        header += " ".join(f"{f'S{i}':>{strat_w-1}}" for i in range(1, n + 1))
+        header += f" │ {'Port':>6}  {'Best/Worst'}"
+        print(header)
+        print("   " + "─" * (40 + n * strat_w + 24))
+
+        for raw_idx, row in self._wide.iterrows():
+            idx = cast(int, raw_idx)
+            w = int(row["window_idx"])
+            label = str(row["window_label"])
+            period = self._compact_label(label)
+            raw_mkt = row["mkt_change_pct"]
+            mkt = float(raw_mkt) if bool(pd.notna(raw_mkt)) else float("nan")
+            mkt_str = f"{mkt:+.1f}%" if not np.isnan(mkt) else "  n/a "
+
+            cells = []
+            profits = []
+            for i in range(1, n + 1):
+                raw_p = row[f"s{i}_profit"]
+                if bool(pd.isna(raw_p)):
+                    cells.append(f"{'--':>{strat_w-1}}")
+                else:
+                    p = float(raw_p)
+                    profits.append((i, p))
+                    cells.append(f"{p:>+{strat_w-1}.2f}")
+
+            port_val = self._port.iloc[idx] if idx < len(self._port) else float("nan")
+            port = float(port_val) if bool(pd.notna(port_val)) else float("nan")
+            port_str = f"{port:+6.2f}" if not np.isnan(port) else "  n/a "
+
+            if profits:
+                best = max(profits, key=lambda x: x[1])
+                worst = min(profits, key=lambda x: x[1])
+                bw = f"S{best[0]}/S{worst[0]}"
+            else:
+                bw = "—"
+
+            mark = ""
+            if not np.isnan(port):
+                mark = "✓" if port > 0 else "✗"
+
+            print(f"   W{w:<2} {period:<22} {mkt_str:>7}  │ " + " ".join(cells) + f" │ {port_str}  {bw:<8} {mark}")
+
+    @staticmethod
+    def _compact_label(label: str) -> str:
+        """'W0: 2024-01-01 → 2024-03-31' → '2024-01 → 2024-03'."""
+        if "→" not in label:
+            return label
+        try:
+            _, dates = label.split(":", 1)
+            a, b = dates.split("→")
+            a = a.strip()[:7]
+            b = b.strip()[:7]
+            return f"{a} → {b}"
+        except Exception:
+            return label
+
+    def _print_portfolio_correlation(self):
+        """Matrice de corrélation NxN des PnL par fenêtre entre strats."""
+        if len(self._wide) == 0 or len(self._strats) < 2:
+            return
+
+        print_section("🔗 CORRÉLATION INTER-STRATS (PnL par fenêtre)")
+
+        n = len(self._strats)
+        cols = [f"s{i}_profit" for i in range(1, n + 1)]
+        sub = cast(pd.DataFrame, self._wide[cols].dropna())
+        if len(sub) < 3:
+            print("   Pas assez de fenêtres communes pour une corrélation fiable.")
+            return
+
+        corr = np.asarray(sub.corr().values, dtype=float)
+
+        labels = [f"S{i}" for i in range(1, n + 1)]
+        print("\n        " + "  ".join(f"{lab:>6}" for lab in labels))
+        for i, lab in enumerate(labels):
+            cells = []
+            for j in range(n):
+                if i == j:
+                    cells.append(f"{'1.00':>6}")
+                else:
+                    v = corr[i, j]
+                    cells.append(f"{v:>+6.2f}")
+            print(f"   {lab:<4}  " + "  ".join(cells))
+
+        # Pires paires
+        worst = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                worst.append((i, j, corr[i, j]))
+        worst.sort(key=lambda t: -abs(t[2]))
+        if worst:
+            i, j, v = worst[0]
+            verdict = (
+                "✓ décorrélation OK" if abs(v) < 0.3
+                else "~ corrélation modérée" if abs(v) < 0.6
+                else "✗ corrélation forte — diversification faible"
+            )
+            print(f"\n   Paire la plus corrélée : S{i+1}-S{j+1} = {v:+.2f}  ({verdict})")
+
+    def _print_portfolio_worst_windows(self, top: int = 5):
+        """Top fenêtres avec le pire PnL portefeuille — breakdown par strat."""
+        if len(self._wide) == 0 or len(self._port) == 0:
+            return
+
+        print_section(f"⚠️  PIRES FENÊTRES PORTEFEUILLE (top {top})")
+
+        df = self._wide.copy()
+        df["port"] = self._port.values
+        df = df.sort_values("port").head(top)
+
+        n = len(self._strats)
+        print()
+        for _, row in df.iterrows():
+            w = int(row["window_idx"])
+            period = self._compact_label(str(row["window_label"]))
+            mkt_raw = row["mkt_change_pct"]
+            mkt_str = f"{float(mkt_raw):+.1f}%" if bool(pd.notna(mkt_raw)) else "n/a"
+            port = float(row["port"])
+            parts = []
+            losses: list[tuple[int, float]] = []
+            for i in range(1, n + 1):
+                v = row[f"s{i}_profit"]
+                if bool(pd.notna(v)):
+                    fv = float(v)
+                    parts.append(f"S{i}={fv:+.2f}")
+                    losses.append((i, fv))
+                else:
+                    parts.append(f"S{i}=--")
+            breakdown = "  ".join(parts)
+            blame = min(losses, key=lambda x: x[1]) if losses else None
+            blame_str = f"  → S{blame[0]} drag" if blame and blame[1] < 0 else ""
+            print(f"   W{w:<2} {period:<22} mkt={mkt_str:>7}  port={port:+5.2f}%  │ {breakdown}{blame_str}")
+
+    def _print_portfolio_stability_over_time(self):
+        """Première moitié vs deuxième moitié — détecte la dégradation d'edge."""
+        if len(self._port) < 6:
+            return
+
+        print_section("⏱  STABILITÉ TEMPORELLE (1ère vs 2nde moitié)")
+
+        n_w = len(self._port)
+        mid = n_w // 2
+        first = self._port.iloc[:mid]
+        second = self._port.iloc[mid:]
+
+        def stats(s):
+            n_prof = int((s > 0).sum())
+            return {
+                "n": len(s),
+                "prof": n_prof,
+                "pct": n_prof / len(s) * 100 if len(s) else 0,
+                "mean": s.mean(),
+                "std": s.std(),
+            }
+
+        a, b = stats(first), stats(second)
+        delta_pct = b["pct"] - a["pct"]
+        delta_mean = b["mean"] - a["mean"]
+
+        print(f"\n   {'':16}{'Fenêtres':>11}{'%Prof':>9}{'PnL μ':>10}{'PnL σ':>10}")
+        print(f"   {'1ère moitié':<16}{a['prof']}/{a['n']:<8}{a['pct']:>7.0f}% {a['mean']:>+9.2f}{a['std']:>+10.2f}")
+        print(f"   {'2nde moitié':<16}{b['prof']}/{b['n']:<8}{b['pct']:>7.0f}% {b['mean']:>+9.2f}{b['std']:>+10.2f}")
+        print(f"   {'Δ':<16}{'':<11}{delta_pct:>+7.0f}pp{delta_mean:>+9.2f}")
+
+        if delta_pct < -20 or delta_mean < -1.0:
+            print(f"\n   ✗ Dégradation marquée — l'edge faiblit en 2nde moitié.")
+        elif delta_pct < -10:
+            print(f"\n   ⚠️  Dégradation légère — surveiller en dry-run.")
+        else:
+            print(f"\n   ✓ Edge stable dans le temps.")
+
+    def _print_portfolio_verdict(self):
+        """Checklist explicite go/no-go dry-run avec critères chiffrés."""
+        print_section("✅ CHECKLIST DRY-RUN")
+
+        cdf = self.consistency_df
+        n = len(cdf)
+        n_w = self.n_windows
+
+        checks = []
+
+        # 1. Toutes les strats profitables sur ≥ 70% des fenêtres
+        all_prof = bool((cdf["pct_profitable"] >= 70).all())
+        worst_prof = float(cdf["pct_profitable"].min())
+        checks.append((all_prof, f"Toutes strats ≥70% fenêtres profitables (min observé : {worst_prof:.0f}%)"))
+
+        # 2. Pas de DD individuel pire que -10% sur une fenêtre
+        if "dd_worst" in cdf.columns:
+            worst_dd = float(cdf["dd_worst"].min())  # le plus négatif
+            ok_dd = worst_dd > -10
+            checks.append((ok_dd, f"DD pire fenêtre > -10% (observé : {worst_dd:.1f}%)"))
+
+        # 3. Pire fenêtre portefeuille > -3%
+        if len(self._port) > 0:
+            worst_port = float(self._port.min())
+            ok_port = worst_port > -3
+            checks.append((ok_port, f"Pire fenêtre portfolio > -3% (observé : {worst_port:+.2f}%)"))
+
+        # 4. Décorrélation : aucune paire > 0.6
+        if len(self._wide) > 0 and n >= 2:
+            cols = [f"s{i}_profit" for i in range(1, n + 1)]
+            sub = cast(pd.DataFrame, self._wide[cols].dropna())
+            if len(sub) >= 3:
+                corr = np.asarray(sub.corr().values, dtype=float)
+                upper = [corr[i, j] for i in range(n) for j in range(i + 1, n)]
+                max_corr = max(abs(v) for v in upper) if upper else 0
+                ok_corr = max_corr < 0.6
+                checks.append((ok_corr, f"Aucune corrélation inter-strats > 0.6 (max observé : {max_corr:+.2f})"))
+
+        # 5. PnL portefeuille positif sur la majorité des fenêtres
+        if len(self._port) > 0:
+            n_prof_port = int((self._port > 0).sum())
+            pct_prof_port = n_prof_port / len(self._port) * 100
+            ok_port_cons = pct_prof_port >= 70
+            checks.append((ok_port_cons, f"Portfolio profitable ≥70% des fenêtres (observé : {pct_prof_port:.0f}%, {n_prof_port}/{len(self._port)})"))
+
+        # 6. Profit factor moyen > 1.2 sur chaque strat
+        if "pf_mean" in cdf.columns:
+            min_pf = float(cdf["pf_mean"].min())
+            ok_pf = min_pf > 1.2
+            checks.append((ok_pf, f"Profit factor μ > 1.2 sur chaque strat (min observé : {min_pf:.2f})"))
+
+        # Affichage
+        n_pass = sum(1 for ok, _ in checks if ok)
+        print()
+        for ok, msg in checks:
+            mark = "✓" if ok else "✗"
+            print(f"   {mark}  {msg}")
+
+        # Verdict global
+        ratio = n_pass / len(checks) if checks else 0
+        print()
+        if ratio == 1.0:
+            print(f"   🟢 GO dry-run — tous les critères ({n_pass}/{len(checks)}) sont remplis.")
+        elif ratio >= 0.8:
+            print(f"   🟡 GO conditionnel — {n_pass}/{len(checks)} critères. Surveiller le(s) point(s) ✗ en dry-run.")
+        elif ratio >= 0.5:
+            print(f"   🟠 GO partiel — {n_pass}/{len(checks)} critères. Considérer retirer/remplacer la strat la plus faible avant dry-run.")
+        else:
+            print(f"   🔴 NO-GO — {n_pass}/{len(checks)} critères seulement. Retravailler la sélection.")
+        print(f"      Window={self.window_months}m  Step={self.step_months}m  N={n_w} fenêtres  ({n} strats)")
 
     def _print_header(self):
         """Header spécifique rolling."""
@@ -261,7 +674,7 @@ class RollingReportGenerator(ReportGenerator):
             return
 
         # Trier par variance Sharpe (plus faible = plus stable)
-        df = df.nsmallest(15, "sharpe_std")
+        df = df.nsmallest(15, "sharpe_std")  # pyright: ignore[reportArgumentType]
 
         print(
             f"\n  {'#':<3} {'Signal':<35} │ {'Sharpe μ':<9} │ {'Sharpe σ':<9} │ {'Min/Max':<15} │ {'Note'}"
@@ -310,7 +723,7 @@ class RollingReportGenerator(ReportGenerator):
             "sharpe",
             "count",
         ]
-        type_stats = type_stats.sort_values("rob_mean", ascending=False)
+        type_stats = type_stats.sort_values("rob_mean", ascending=False)  # pyright: ignore[reportCallIssue]
 
         print(
             f"\n  {'Type':<15} │ {'N':<5} │ {'Robustesse':<12} │ {'Stabilité':<9} │ "
@@ -574,7 +987,7 @@ class RollingReportGenerator(ReportGenerator):
             (df["pct_profitable"] < 40)
             | (df["sharpe_std"] > 1.5)
             | (df["robustness"] < 0.2)
-        ].nsmallest(5, "robustness")
+        ].nsmallest(5, "robustness")  # pyright: ignore[reportArgumentType]
 
         if len(worst) > 0:
             for _, r in worst.iterrows():
@@ -681,7 +1094,7 @@ class RollingReportGenerator(ReportGenerator):
         header = (
             f"  {'Type':<15} │ "
             + " │ ".join(f"{c:^8}" for c in coin_names)
-            + " │ {'Moy':^6} │ Écart"
+            + f" │ {'Moy':^6} │ Écart"
         )
         print(header)
         print("  " + "─" * len(header))

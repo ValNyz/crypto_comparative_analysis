@@ -13,7 +13,7 @@ Ce module ne fait AUCUN affichage. Il fournit uniquement:
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
-from typing import List, Tuple
+from typing import List, Tuple, cast
 import pandas as pd
 import numpy as np
 
@@ -182,16 +182,27 @@ def calculate_consistency(
     # Grouper par signal/pair/timeframe
     grouped = raw_df.groupby(["signal", "pair", "timeframe"])
 
-    for (signal, pair, tf), group in grouped:
+    for key, group in grouped:
+        signal, pair, tf = cast(Tuple[str, str, str], key)
         n_windows = len(group)
 
         if n_windows < min_windows:
             continue
 
-        sharpes = group["sharpe"].values
-        profits = group["profit_pct"].values
-        win_rates = group["win_rate"].values
-        trades = group["trades"].values
+        def _col(name, default=0.0):
+            if name in group.columns:
+                return np.asarray(group[name].to_numpy(), dtype=float)
+            return np.full(n_windows, default, dtype=float)
+
+        sharpes = _col("sharpe")
+        profits = _col("profit_pct")
+        win_rates = _col("win_rate")
+        trades = _col("trades")
+        calmars = _col("calmar")
+        max_dds = _col("max_dd_pct")
+        pfs = _col("profit_factor")
+        profit_longs = _col("profit_pct_long")
+        profit_shorts = _col("profit_pct_short")
 
         n_profitable = np.sum(profits > 0)
         n_sharpe_pos = np.sum(sharpes > 0)
@@ -236,6 +247,19 @@ def calculate_consistency(
                 "profit_std": profit_std,
                 "profit_min": np.min(profits),
                 "profit_max": np.max(profits),
+                # Calmar
+                "calmar_mean": np.mean(calmars),
+                "calmar_std": np.std(calmars),
+                "calmar_min": np.min(calmars),
+                "calmar_max": np.max(calmars),
+                # Drawdown (max_dd_pct stocké négatif → min() = pire)
+                "dd_mean": np.mean(max_dds),
+                "dd_worst": np.min(max_dds),
+                # Profit factor
+                "pf_mean": np.mean(pfs),
+                # L/S split (somme PnL long / short à travers les fenêtres)
+                "profit_long_sum": np.sum(profit_longs),
+                "profit_short_sum": np.sum(profit_shorts),
                 # Win rate
                 "wr_mean": np.mean(win_rates),
                 "wr_std": np.std(win_rates),
@@ -368,12 +392,20 @@ def _print_rolling_header(windows: List[RollingWindow], config: RollingConfig):
     print("\n" + "=" * 120)
     print("🔄 ROLLING BACKTEST / WALK-FORWARD ANALYSIS")
     print("=" * 120)
+    overlap_pct = max(0.0, (1 - config.step_months / config.window_months) * 100)
+    overlap_note = ""
+    if overlap_pct > 0:
+        overlap_note = (
+            f"   ⚠️  Chevauchement {overlap_pct:.0f}% — fenêtres non-iid, "
+            f"std de Sharpe/Calmar sous-estimée"
+        )
     print(f"""
    Configuration:
    ├─ Fenêtre:    {config.window_months} mois
    ├─ Décalage:   {config.step_months} mois
    └─ Fenêtres:   {len(windows)}
-   
+{overlap_note}
+
    Périodes:""")
     for w in windows:
         print(f"   • {w.label} ({w.duration_days} jours)")
