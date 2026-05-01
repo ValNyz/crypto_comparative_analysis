@@ -34,7 +34,7 @@ def print_per_coin_summary(df: pd.DataFrame, top_n: int = 5):
 
         # Stats globales pour cette paire
         profitable = pair_df[pair_df["profit_pct"] > 0]
-        avg_sharpe = pair_df["sharpe"].mean()
+        avg_calmar = pair_df["calmar"].mean()
 
         # Coin name (extract from pair like "BTC/USDC:USDC" -> "BTC")
         coin = short_pair(pair)
@@ -44,7 +44,7 @@ def print_per_coin_summary(df: pd.DataFrame, top_n: int = 5):
         print(
             f"     Stratégies: {len(pair_df)} │ "
             f"Profitables: {len(profitable)} ({len(profitable) / len(pair_df) * 100:.1f}%) │ "
-            f"Sharpe moyen: {avg_sharpe:+.2f}"
+            f"Calmar moyen: {avg_calmar:+.2f}"
         )
         print(f"{'─' * 110}")
 
