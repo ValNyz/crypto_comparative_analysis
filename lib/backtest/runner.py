@@ -4,7 +4,9 @@
 """Backtest runner with parallel execution."""
 
 import json
+import shutil
 import subprocess
+import tempfile
 import time
 import threading
 import zipfile
@@ -202,6 +204,49 @@ class BacktestRunner:
         """Génère un nom de fichier unique pour l'export."""
         safe_pair = pair.replace("/", "_").replace(":", "_")
         return f"{signal.name}_{safe_pair}_{timeframe}"
+
+    def _make_isolated_user_data(self, prefix: str) -> Path:
+        """Create an isolated temporary user_data_dir for a single freqtrade run.
+
+        Each parallel worker gets its own dir → no collision on the
+        backtest-result-{TS}.zip filename freqtrade writes (it ignores
+        --export-filename). Created under the project's user_data/ so
+        rename() across filesystems is never needed when consolidating.
+        Caller is responsible for shutil.rmtree.
+        """
+        parent = self.export_dir.parent
+        tmp = Path(tempfile.mkdtemp(prefix=prefix, dir=str(parent)))
+        (tmp / "backtest_results").mkdir(parents=True, exist_ok=True)
+        return tmp
+
+    def _consolidate_export(self, isolated: Path, export_name: str) -> None:
+        """Move freqtrade's backtest-result-{TS}.zip + .meta.json from the
+        isolated worker dir to the central export_dir under a deterministic
+        name (`{export_name}.zip` / `.meta.json`).
+
+        This is what freqtrade WOULD do if it honored --export-filename. By
+        consolidating ourselves we keep the cache index (`_build_export_index`)
+        functional across runs while avoiding the timestamp-collision bug
+        when multiple workers write concurrently.
+        """
+        src_dir = isolated / "backtest_results"
+        if not src_dir.exists():
+            return
+        zips = list(src_dir.glob("*.zip"))
+        if not zips:
+            return
+        src_zip = max(zips, key=lambda p: p.stat().st_mtime)
+        # freqtrade names meta as `{stem}.meta.json` (see get_backtest_metadata_filename)
+        src_meta = src_zip.parent / f"{src_zip.stem}.meta.json"
+        dst_zip = self.export_dir / f"{export_name}.zip"
+        dst_meta = self.export_dir / f"{export_name}.meta.json"
+        # Replace any prior result for the same (signal, pair, tf) atomically.
+        for dst in (dst_zip, dst_meta):
+            if dst.exists():
+                dst.unlink()
+        src_zip.rename(dst_zip)
+        if src_meta.exists():
+            src_meta.rename(dst_meta)
 
     def _build_export_index(self) -> Dict[Tuple[str, str, str, str], Path]:
         """Scan user_data/backtest_results/*.meta.json → {(class_name, tf, timerange, pair): zip_path}.
@@ -528,13 +573,46 @@ class BacktestRunner:
             "month",
         ]
 
-        # Pool builds use an isolated user_data_dir so concurrent workers
-        # don't collide on backtest_results/backtest-result-{TS}.zip when
-        # freqtrade ignores --export-filename (writes get corrupted otherwise).
+        # Isolate this freqtrade run in its own user_data_dir so concurrent
+        # workers don't collide on backtest_results/backtest-result-{TS}.zip
+        # (freqtrade ignores --export-filename → all workers write to the
+        # default path with second-resolution timestamps → corrupt zips
+        # AND corrupt .meta.json that later poison every backtest's
+        # load_prior_backtest scan). On success we consolidate the result
+        # to self.export_dir under a deterministic name so the cache index
+        # still works across runs.
+        #
+        # Pool builds set _user_data_dir_override themselves because they
+        # need to read the zip back from the isolated dir before cleanup.
         pool_uds = signal.params.get("_user_data_dir_override")
+        isolated_dir: Optional[Path] = None
         if pool_uds:
             cmd += ["--user-data-dir", str(pool_uds)]
+        else:
+            isolated_dir = self._make_isolated_user_data("ftrun_")
+            cmd += ["--user-data-dir", str(isolated_dir)]
 
+        try:
+            return self._run_freqtrade_loop(
+                cmd, signal, pair, actual_tf, isolated_dir, export_name,
+            )
+        finally:
+            if isolated_dir is not None:
+                shutil.rmtree(isolated_dir, ignore_errors=True)
+
+    def _run_freqtrade_loop(
+        self,
+        cmd: list,
+        signal,
+        pair: str,
+        actual_tf: str,
+        isolated_dir: Optional[Path],
+        export_name: str,
+    ) -> Optional[Dict]:
+        """Subprocess retry loop extracted so the parent run_single can
+        wrap it in try/finally for tempdir cleanup without restructuring
+        every early-return path.
+        """
         # Retry loop
         for attempt in range(self.max_retries + 1):
             try:
@@ -604,6 +682,13 @@ class BacktestRunner:
                                 f"    stdout(tail): {out_tail!r}"
                             )
                     return None
+
+                # Move freqtrade's output from the isolated worker dir to
+                # the central export_dir under a deterministic name. Pool
+                # runs (isolated_dir is None) manage their own dir and read
+                # the zip themselves before cleanup.
+                if isolated_dir is not None:
+                    self._consolidate_export(isolated_dir, export_name)
 
                 parsed = parse_freqtrade_output(result.stdout)
 
@@ -834,9 +919,6 @@ class BacktestRunner:
 
         Returns True on cache hit / successful build, False on failure.
         """
-        import shutil
-        import tempfile
-
         pair, tf, exit_cfg, direction = cell
         cache_key = compute_cache_key(
             pair, tf, exit_cfg,
@@ -856,8 +938,7 @@ class BacktestRunner:
         class_name = f"S_{sanitize_class_name(pool_sig.name)}_{tf}"
 
         # Isolate this freqtrade run: its export goes to a private temp dir.
-        pool_user_data = Path(tempfile.mkdtemp(prefix="ftpool_"))
-        (pool_user_data / "backtest_results").mkdir(parents=True, exist_ok=True)
+        pool_user_data = self._make_isolated_user_data("ftpool_")
         # Smuggled through signal.params so run_single can append --user-data-dir
         pool_sig.params["_user_data_dir_override"] = str(pool_user_data)
 
