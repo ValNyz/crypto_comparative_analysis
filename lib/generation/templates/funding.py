@@ -22,7 +22,10 @@ class {class_name}(IStrategy):
     can_short = True
     minimal_roi = {roi}
     stoploss = {stoploss}
-    trailing_stop = False
+    trailing_stop = {trailing_stop}
+    trailing_stop_positive = {trailing_stop_positive}
+    trailing_stop_positive_offset = {trailing_stop_positive_offset}
+    trailing_only_offset_is_reached = {trailing_only_offset_is_reached}
     startup_candle_count = 250
 
     ZSCORE_THRESHOLD = {zscore_threshold}

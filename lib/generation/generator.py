@@ -85,6 +85,31 @@ def _external_data_dir(data_dir: str) -> str:
     return str(Path(data_dir).parent / "external")
 
 
+def _trailing_attrs(exit_cfg: ExitConfig) -> dict:
+    """Native freqtrade trailing_stop_* class attrs derived from exit_cfg.
+
+    When use_trailing_roi=True, the strategy uses freqtrade's NATIVE trailing
+    mechanism (evaluated intra-bar via HIGH/LOW, no lookahead, exits at the
+    stop level not at OPEN). When False, defaults are emitted but inert
+    because trailing_stop=False.
+
+    freqtrade requires offset > positive, enforced by ExitConfig validation.
+    """
+    if exit_cfg.use_trailing_roi:
+        return {
+            "trailing_stop": True,
+            "trailing_stop_positive": exit_cfg.trail_distance_pct,
+            "trailing_stop_positive_offset": exit_cfg.trail_activate_pct,
+            "trailing_only_offset_is_reached": True,
+        }
+    return {
+        "trailing_stop": False,
+        "trailing_stop_positive": 0.01,
+        "trailing_stop_positive_offset": 0.02,
+        "trailing_only_offset_is_reached": True,
+    }
+
+
 # === Conditional indicator blocks ===
 # When a group is referenced (signal_type, params filter, or combo condition),
 # its compute block is appended to INDICATORS_CORE. This avoids paying for
@@ -295,6 +320,7 @@ class StrategyGenerator:
             timeframe=timeframe,
             roi=json.dumps({str(k): v for k, v in signal.roi.items()}),
             stoploss=signal.stoploss,
+            **_trailing_attrs(exit_cfg),
             # Funding parameters
             zscore_threshold=signal.params.get("zscore", 1.5),
             funding_lookback=signal.params.get("lookback", 168),
@@ -425,8 +451,17 @@ class StrategyGenerator:
         )
         exit_logic = generate_exit_logic(exit_cfg, signal.signal_type)
 
-        # Determine if trailing stop should be used
-        trailing_stop = "True" if signal.signal_type == "ema_cross" else "False"
+        # Trailing attrs come from exit_cfg (use_trailing_roi). Legacy: ema_cross
+        # signals default to trailing on with the old hardcoded values when
+        # exit_cfg doesn't already configure trailing.
+        trailing = _trailing_attrs(exit_cfg)
+        if signal.signal_type == "ema_cross" and not exit_cfg.use_trailing_roi:
+            trailing = {
+                "trailing_stop": True,
+                "trailing_stop_positive": 0.01,
+                "trailing_stop_positive_offset": 0.02,
+                "trailing_only_offset_is_reached": True,
+            }
 
         return STRATEGY_TEMPLATE_STANDARD.format(
             name=signal.name,
@@ -434,7 +469,7 @@ class StrategyGenerator:
             timeframe=timeframe,
             roi=json.dumps({str(k): v for k, v in signal.roi.items()}),
             stoploss=signal.stoploss,
-            trailing_stop=trailing_stop,
+            **trailing,
             # Regime parameters
             regime_lookback=self.config.regime_lookback,
             regime_adx_threshold=self.config.regime_adx_threshold,
@@ -508,6 +543,7 @@ class StrategyGenerator:
             timeframe=timeframe,
             roi=json.dumps({str(k): v for k, v in signal.roi.items()}),
             stoploss=signal.stoploss,
+            **_trailing_attrs(exit_cfg),
             seed=int(signal.params.get("seed", 42)),
             target_trades=int(signal.params.get("target_trades", 2000)),
             direction=signal.direction,

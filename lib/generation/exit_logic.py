@@ -202,17 +202,21 @@ def generate_exit_logic(exit_config: ExitConfig, signal_type: str) -> str:
 
 def generate_custom_exit_method(exit_config: ExitConfig) -> str:
     """
-    Emit a `custom_exit()` method body for regime_roi, atr_roi, zscore_roi,
-    or trailing_roi. Returns "" when none of those flags is set.
+    Emit a `custom_exit()` method body for regime_roi, atr_roi, or zscore_roi.
+    Returns "" when none of those flags is set.
 
-    Priority if multiple flags set: regime > atr > zscore > trailing.
+    `use_trailing_roi` is handled by native freqtrade `trailing_stop_*` class
+    attributes (see _trailing_attrs in generator.py) — no custom_exit needed
+    for trailing because the native mechanism evaluates intra-bar via HIGH/LOW
+    without lookahead and exits at the stop level instead of OPEN.
+
+    Priority if multiple flags set: regime > atr > zscore.
     YAML should set only one.
     """
     flags = (
         exit_config.use_regime_roi,
         exit_config.use_atr_roi,
         exit_config.use_zscore_roi,
-        exit_config.use_trailing_roi,
     )
     if not any(flags):
         return ""
@@ -281,30 +285,6 @@ def generate_custom_exit_method(exit_config: ExitConfig) -> str:
             f"{ind}{ind}{ind}return f'roi_zs{{abs_z:.1f}}_{{int(target*10000)}}bps'",
             f"{ind}{ind}return None",
         ]
-    elif exit_config.use_trailing_roi:
-        activate = exit_config.trail_activate_pct
-        distance = exit_config.trail_distance_pct
-        # Use trade.max_rate (long) / trade.min_rate (short): freqtrade tracks
-        # the intra-bar peak HIGH / trough LOW across all bars seen by the trade
-        # and updates these BEFORE invoking custom_exit (no lookahead).
-        # `trade.calc_profit_ratio(rate)` converts a price into the same profit
-        # ratio units as `current_profit`, handling fees/leverage/direction.
-        # Previous version used current_profit at OPEN, which missed intra-bar
-        # peaks that ROI saw — trailing rarely armed before ROI fired.
-        lines += [
-            f"{ind}{ind}activate, distance = {activate}, {distance}",
-            f"{ind}{ind}if trade.is_short:",
-            f"{ind}{ind}{ind}peak_rate = trade.min_rate if trade.min_rate else trade.open_rate",
-            f"{ind}{ind}else:",
-            f"{ind}{ind}{ind}peak_rate = trade.max_rate if trade.max_rate else trade.open_rate",
-            f"{ind}{ind}peak = float(trade.calc_profit_ratio(peak_rate))",
-            f"{ind}{ind}if peak < activate:",
-            f"{ind}{ind}{ind}return None",
-            f"{ind}{ind}if current_profit < peak - distance:",
-            f"{ind}{ind}{ind}return f'trail_peak{{int(peak*10000)}}_out{{int(current_profit*10000)}}'",
-            f"{ind}{ind}return None",
-        ]
-
     return "\n".join(lines)
 
 

@@ -19,9 +19,9 @@ class {class_name}(IStrategy):
     minimal_roi = {roi}
     stoploss = {stoploss}
     trailing_stop = {trailing_stop}
-    trailing_stop_positive = 0.01
-    trailing_stop_positive_offset = 0.02
-    trailing_only_offset_is_reached = True
+    trailing_stop_positive = {trailing_stop_positive}
+    trailing_stop_positive_offset = {trailing_stop_positive_offset}
+    trailing_only_offset_is_reached = {trailing_only_offset_is_reached}
     startup_candle_count = 250
 
     DATA_DIR = Path("{data_dir}/futures")
