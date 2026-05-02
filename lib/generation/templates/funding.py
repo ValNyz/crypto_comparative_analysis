@@ -238,6 +238,10 @@ class {class_name}(IStrategy):
         merge_cols = ["date_available", "funding_rate", "funding_zscore", "funding_ma3", "funding_cum_7d_z"] + extra_cols_present
         if vel_col_present:
             merge_cols.append("funding_velocity_zscore")
+        # Live OHLCV (CCXT 4.5+) arrive en datetime64[ms, UTC], feather funding
+        # est en datetime64[ns, UTC]. merge_asof refuse les types differents.
+        if funding["date_available"].dtype != dataframe["date"].dtype:
+            funding["date_available"] = funding["date_available"].astype(dataframe["date"].dtype)
         merged = pd.merge_asof(dataframe, funding[merge_cols],
                                left_on="date", right_on="date_available", direction="backward")
         merged["funding_rate"] = merged["funding_rate"].fillna(0.0)
@@ -291,6 +295,10 @@ class {class_name}(IStrategy):
             ref_df = self.load_cross_coin_funding(self.INTERCOIN_REF, dataframe)
             _ref_col = f"ref_{{self.INTERCOIN_REF.lower()}}_funding_zscore"
             if ref_df is not None and len(ref_df) > 0:
+                # Aligne la precision datetime (ms live vs ns feather) sinon MergeError.
+                if ref_df["date"].dtype != dataframe["date"].dtype:
+                    ref_df = ref_df.copy()
+                    ref_df["date"] = ref_df["date"].astype(dataframe["date"].dtype)
                 _merged = pd.merge_asof(
                     dataframe.sort_values('date')[['date']].reset_index(drop=True),
                     ref_df[['date', 'funding_zscore']].sort_values('date').reset_index(drop=True),

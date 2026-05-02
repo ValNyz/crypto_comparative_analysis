@@ -112,7 +112,10 @@ CROSS_COIN_LOADERS_BLOCK = '''
             ["bull", "bear", "range"],
             default="neutral",
         )
-        slim = btc_d[["date", "btc_regime"]]
+        slim = btc_d[["date", "btc_regime"]].copy()
+        # Aligne la precision datetime (ms live OHLCV vs ns feather) sinon MergeError.
+        if slim["date"].dtype != dataframe["date"].dtype:
+            slim["date"] = slim["date"].astype(dataframe["date"].dtype)
         merged = pd.merge_asof(
             dataframe.sort_values("date").reset_index(drop=True),
             slim.sort_values("date").reset_index(drop=True),
@@ -145,7 +148,10 @@ CROSS_COIN_LOADERS_BLOCK = '''
             dataframe[col_lo] = float("-inf")
             dataframe[col_ratio] = 1.0
             return dataframe
-        ref_slim = ref_df[["date", "close"]].rename(columns={{"close": f"_{{ref_up.lower()}}_close"}})
+        ref_slim = ref_df[["date", "close"]].rename(columns={{"close": f"_{{ref_up.lower()}}_close"}}).copy()
+        # Aligne la precision datetime (ms live OHLCV vs ns feather) sinon MergeError.
+        if ref_slim["date"].dtype != dataframe["date"].dtype:
+            ref_slim["date"] = ref_slim["date"].astype(dataframe["date"].dtype)
         merged = pd.merge_asof(
             dataframe.sort_values("date").reset_index(drop=True),
             ref_slim.sort_values("date").reset_index(drop=True),
